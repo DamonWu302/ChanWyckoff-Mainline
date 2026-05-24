@@ -15,7 +15,7 @@
 交付物：
 
 - FastAPI 后端工程。
-- React + TypeScript + Vite 前端工程。
+- Next.js + React + TypeScript 前端工程。
 - MySQL 连接配置。
 - SQLAlchemy/Alembic 初始化。
 - APScheduler 初始化。
@@ -281,4 +281,3 @@
 10. 今日作战台。
 11. 题材增强回测。
 12. 复盘和 LLM 解释。
-

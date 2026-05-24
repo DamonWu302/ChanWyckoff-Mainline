@@ -4,11 +4,13 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+*.tsbuildinfo
 .venv/
 venv/
 
 # Node
 node_modules/
+.next/
 dist/
 build/
 .vite/
@@ -27,4 +29,3 @@ logs/
 .DS_Store
 .idea/
 .vscode/
-

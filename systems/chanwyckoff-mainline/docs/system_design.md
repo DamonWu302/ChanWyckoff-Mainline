@@ -286,9 +286,9 @@ Tushare、同花顺/iFinD 可作为后续增强源。同花顺口径更贴近短
 
 前端技术栈：
 
+- Next.js。
 - React。
 - TypeScript。
-- Vite。
 
 任务调度：
 
@@ -323,4 +323,3 @@ LLM 边界：
 - 每个主线里的趋势容量核心是谁。
 - 哪些核心票出现 `proto_3buy` 或 `confirmed_3buy`。
 - 建议轻仓、加仓、观察，还是过滤。
-

@@ -13,6 +13,8 @@
 ```text
 systems/
   chanwyckoff-mainline/
+    app/
+    components/
     docs/
       system_design.md
       phase1_tasks.md

@@ -163,7 +163,7 @@ A 股中短波段交易需要同时判断大盘环境、题材主线、板块核
 - Secondary pages are theme mainline, stock signal detail, backtest, and review.
 - The backend stack is Python, FastAPI, SQLAlchemy, Alembic, Pandas/Polars, APScheduler, and pytest.
 - The database is MySQL.
-- The frontend stack is React, TypeScript, and Vite.
+- The frontend stack is Next.js, React, and TypeScript.
 - The core deep modules should be data providers, market regime engine, theme strength engine, core stock ranker, structure detector, third-buy state machine, Wyckoff scorer, risk engine, backtest engine, and review/LLM summarizer.
 
 ## Testing Decisions
@@ -208,4 +208,3 @@ A 股中短波段交易需要同时判断大盘环境、题材主线、板块核
 - The signal detail page should visually connect the 30-minute platform/center, breakout bar, pullback area, stop zone, target levels, and Wyckoff evidence.
 - The backtest page should not only show an equity curve. It must show score stratification and whether confirmation improves results.
 - The review page should preserve both rule output and discretionary human notes, because the system is a decision-support workflow before it becomes a semi-automated execution workflow.
-

@@ -18,6 +18,6 @@
 
 - 后端：Python, FastAPI, SQLAlchemy, Alembic, Pandas/Polars, APScheduler
 - 数据库：MySQL
-- 前端：React, TypeScript, Vite
+- 前端：Next.js, React, TypeScript
 - 行情主源：TickFlow
 - 题材源：东方财富/AkShare
