@@ -258,42 +258,103 @@ h3 {
 }
 
 .button {
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--surface);
-  color: var(--fg);
-  min-height: 36px;
-  padding: 0 13px;
-  cursor: pointer;
+  position: relative;
+  isolation: isolate;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
-  box-shadow: 0 1px 0 oklch(100% 0 0 / 0.9) inset;
+  min-height: 38px;
+  padding: 0 15px;
+  border: 1px solid color-mix(in oklch, var(--fg), transparent 86%);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, oklch(100% 0 0 / 0.98), color-mix(in oklch, var(--surface), var(--surface-3) 38%)),
+    var(--surface);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 760;
+  letter-spacing: 0;
+  overflow: hidden;
+  box-shadow:
+    0 1px 0 oklch(100% 0 0 / 0.9) inset,
+    0 10px 24px oklch(18% 0.026 245 / 0.06);
+}
+
+.button::before {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  z-index: -1;
+  border-radius: 6px;
+  background:
+    linear-gradient(135deg, oklch(100% 0 0 / 0.68), transparent 42%),
+    linear-gradient(90deg, color-mix(in oklch, var(--accent-2), white 82%), transparent 58%);
+  opacity: 0.42;
+  transition: opacity 180ms var(--ease-standard), transform 180ms var(--ease-standard);
 }
 
 .button:hover {
-  border-color: color-mix(in oklch, var(--accent), var(--border) 55%);
-  transform: translateY(-1px);
-  box-shadow: 0 8px 22px oklch(18% 0.026 245 / 0.08);
+  border-color: color-mix(in oklch, var(--accent-2), var(--border) 22%);
+  transform: translateY(-2px);
+  box-shadow:
+    0 1px 0 oklch(100% 0 0 / 0.94) inset,
+    0 16px 36px oklch(18% 0.026 245 / 0.12);
+}
+
+.button:hover::before {
+  opacity: 0.72;
+  transform: translateX(4px);
 }
 
 .button.primary {
-  border-color: color-mix(in oklch, var(--accent), black 8%);
+  border-color: color-mix(in oklch, var(--accent), black 16%);
   background:
-    linear-gradient(180deg, color-mix(in oklch, var(--accent), white 8%), color-mix(in oklch, var(--accent), black 8%));
+    linear-gradient(180deg, color-mix(in oklch, var(--accent), white 14%), color-mix(in oklch, var(--accent), black 12%)),
+    radial-gradient(120px 80px at 20% 0%, oklch(100% 0 0 / 0.4), transparent 70%);
   color: white;
   box-shadow:
-    0 12px 28px oklch(59% 0.17 154 / 0.24),
-    0 1px 0 oklch(100% 0 0 / 0.3) inset;
+    0 0 0 1px color-mix(in oklch, var(--accent), white 72%) inset,
+    0 16px 34px oklch(59% 0.17 154 / 0.28),
+    0 1px 0 oklch(100% 0 0 / 0.34) inset;
+}
+
+.button.primary::before {
+  background:
+    linear-gradient(110deg, transparent 0 20%, oklch(100% 0 0 / 0.42) 42%, transparent 64%),
+    linear-gradient(90deg, color-mix(in oklch, var(--accent-2), white 26%), transparent 62%);
+  opacity: 0.46;
+}
+
+.button.primary:hover {
+  border-color: color-mix(in oklch, var(--accent), black 26%);
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--accent), white 64%) inset,
+    0 20px 42px oklch(59% 0.17 154 / 0.34),
+    0 1px 0 oklch(100% 0 0 / 0.38) inset;
 }
 
 .button.ghost {
-  background: transparent;
+  border-color: transparent;
+  background: oklch(100% 0 0 / 0.02);
+  box-shadow: none;
+}
+
+.button.ghost::before {
+  opacity: 0;
+}
+
+.button.ghost:hover {
+  border-color: color-mix(in oklch, var(--accent-2), transparent 62%);
+  background: color-mix(in oklch, var(--accent-2), white 92%);
+  box-shadow: 0 10px 24px oklch(18% 0.026 245 / 0.08);
 }
 
 .button.is-copied {
   border-color: color-mix(in oklch, var(--accent), black 6%);
-  background: color-mix(in oklch, var(--accent), white 86%);
+  background:
+    linear-gradient(180deg, color-mix(in oklch, var(--accent), white 82%), color-mix(in oklch, var(--accent), white 88%));
   color: oklch(34% 0.12 145);
 }
 
@@ -314,7 +375,7 @@ textarea,
 .button:active,
 .link-button:active,
 .tab:active {
-  transform: translateY(0);
+  transform: translateY(0) scale(0.985);
 }
 
 .grid {
@@ -656,6 +717,7 @@ tbody tr.filtered-out {
 }
 
 .link-button {
+  position: relative;
   display: inline-flex;
   align-items: center;
   min-height: 28px;
@@ -670,9 +732,26 @@ tbody tr.filtered-out {
   white-space: nowrap;
 }
 
+.link-button::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 2px;
+  height: 1px;
+  background: currentColor;
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 160ms var(--ease-standard);
+}
+
 .link-button:hover {
   color: color-mix(in oklch, var(--accent), black 12%);
   transform: translateY(-1px);
+}
+
+.link-button:hover::after {
+  transform: scaleX(1);
 }
 
 .filters {
