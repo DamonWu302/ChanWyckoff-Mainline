@@ -6,7 +6,7 @@
   --fg: oklch(18% 0.026 245);
   --muted: oklch(47% 0.022 245);
   --border: oklch(88% 0.012 245);
-  --accent: oklch(59% 0.17 154);
+  --accent: oklch(59% 0.18 28);
   --accent-2: oklch(58% 0.16 228);
   --warn: oklch(68% 0.16 75);
   --danger: oklch(58% 0.18 28);
@@ -106,7 +106,7 @@ textarea {
   background:
     linear-gradient(135deg, var(--accent), color-mix(in oklch, var(--accent-2), black 8%));
   color: white;
-  box-shadow: 0 10px 28px oklch(59% 0.17 154 / 0.25);
+  box-shadow: 0 10px 28px oklch(59% 0.18 28 / 0.25);
   font: 700 13px/1 var(--font-mono);
   letter-spacing: 0.02em;
 }
@@ -176,7 +176,7 @@ textarea {
   width: 3px;
   border-radius: 999px;
   background: var(--accent);
-  box-shadow: 0 0 18px oklch(59% 0.17 154 / 0.5);
+  box-shadow: 0 0 18px oklch(59% 0.18 28 / 0.5);
 }
 
 .nav-kbd {
@@ -316,7 +316,7 @@ h3 {
   color: white;
   box-shadow:
     0 0 0 1px color-mix(in oklch, var(--accent), white 72%) inset,
-    0 16px 34px oklch(59% 0.17 154 / 0.28),
+    0 16px 34px oklch(59% 0.18 28 / 0.28),
     0 1px 0 oklch(100% 0 0 / 0.34) inset;
 }
 
@@ -331,7 +331,7 @@ h3 {
   border-color: color-mix(in oklch, var(--accent), black 26%);
   box-shadow:
     0 0 0 1px color-mix(in oklch, var(--accent), white 64%) inset,
-    0 20px 42px oklch(59% 0.17 154 / 0.34),
+    0 20px 42px oklch(59% 0.18 28 / 0.34),
     0 1px 0 oklch(100% 0 0 / 0.38) inset;
 }
 
@@ -355,7 +355,7 @@ h3 {
   border-color: color-mix(in oklch, var(--accent), black 6%);
   background:
     linear-gradient(180deg, color-mix(in oklch, var(--accent), white 82%), color-mix(in oklch, var(--accent), white 88%));
-  color: oklch(34% 0.12 145);
+  color: oklch(40% 0.14 28);
 }
 
 .button,
@@ -549,7 +549,7 @@ textarea,
 
 .status.good {
   background: color-mix(in oklch, var(--accent), white 84%);
-  color: oklch(34% 0.12 145);
+  color: oklch(40% 0.14 28);
 }
 
 .status.info {

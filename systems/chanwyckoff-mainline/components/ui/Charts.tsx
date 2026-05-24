@@ -27,8 +27,8 @@ export function StructureChart() {
     ["181px", "var(--accent)"],
     ["214px", "var(--accent)"],
     ["188px", "var(--accent)"],
-    ["168px", "oklch(62% 0.11 145)"],
-    ["174px", "oklch(62% 0.11 145)"],
+    ["168px", "oklch(62% 0.12 28)"],
+    ["174px", "oklch(62% 0.12 28)"],
     ["210px", "var(--accent)"],
   ];
 
