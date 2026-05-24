@@ -10,6 +10,7 @@
 
 ## 文档
 
+- [产品需求文档 PRD](docs/prd.md)
 - [系统设计文档](docs/system_design.md)
 - [第一阶段实施任务清单](docs/phase1_tasks.md)
 
@@ -20,4 +21,3 @@
 - 前端：React, TypeScript, Vite
 - 行情主源：TickFlow
 - 题材源：东方财富/AkShare
-
