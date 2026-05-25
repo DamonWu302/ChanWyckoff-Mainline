@@ -9,12 +9,15 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.db.base import Base
 from app.ingestion.market_data import (
     DailyBarPayload,
+    IndexBarPayload,
     InstrumentPayload,
     IntradayBarPayload,
     MarketDataIngestionService,
+    TdxDailySnapshotPayload,
     ThemeConstituentPayload,
     ThemePayload,
     ThemeSnapshotPayload,
+    TradingCalendarPayload,
 )
 
 
@@ -329,3 +332,130 @@ def test_theme_snapshots_import_is_idempotent(db_session: Session) -> None:
     assert snapshot is not None
     assert snapshot.amount == Decimal("9765432100.0000")
     assert snapshot.limit_up_count == 4
+
+
+def test_trading_calendar_import_is_idempotent(db_session: Session) -> None:
+    service = MarketDataIngestionService(db_session)
+
+    first_result = service.upsert_trading_calendars(
+        [
+            TradingCalendarPayload(
+                exchange="SSE",
+                trade_date=date(2026, 5, 25),
+                is_open=True,
+                previous_trade_date=date(2026, 5, 22),
+                next_trade_date=date(2026, 5, 26),
+            )
+        ]
+    )
+    second_result = service.upsert_trading_calendars(
+        [
+            TradingCalendarPayload(
+                exchange="SSE",
+                trade_date=date(2026, 5, 25),
+                is_open=False,
+                previous_trade_date=date(2026, 5, 22),
+                next_trade_date=date(2026, 5, 26),
+            )
+        ]
+    )
+
+    calendar = service.get_trading_calendar("SSE", date(2026, 5, 25))
+
+    assert first_result.created == 1
+    assert first_result.updated == 0
+    assert second_result.created == 0
+    assert second_result.updated == 1
+    assert service.count_trading_calendars() == 1
+    assert calendar is not None
+    assert calendar.is_open is False
+
+
+def test_index_bars_import_is_idempotent(db_session: Session) -> None:
+    service = MarketDataIngestionService(db_session)
+
+    first_result = service.upsert_index_bars(
+        [
+            IndexBarPayload(
+                index_code="000001.SH",
+                index_name="上证指数",
+                trade_date=date(2026, 5, 25),
+                adjustment="none",
+                open=Decimal("3120.00"),
+                high=Decimal("3150.00"),
+                low=Decimal("3110.00"),
+                close=Decimal("3140.00"),
+                volume=321000000,
+                amount=Decimal("345678901234.00"),
+                source="tickflow",
+            )
+        ]
+    )
+    second_result = service.upsert_index_bars(
+        [
+            IndexBarPayload(
+                index_code="000001.SH",
+                index_name="上证指数",
+                trade_date=date(2026, 5, 25),
+                adjustment="none",
+                open=Decimal("3120.00"),
+                high=Decimal("3155.00"),
+                low=Decimal("3110.00"),
+                close=Decimal("3148.00"),
+                volume=321000000,
+                amount=Decimal("345678901234.00"),
+                source="tickflow",
+            )
+        ]
+    )
+
+    index_bar = service.get_index_bar("000001.SH", date(2026, 5, 25), "none")
+
+    assert first_result.created == 1
+    assert first_result.updated == 0
+    assert second_result.created == 0
+    assert second_result.updated == 1
+    assert service.count_index_bars() == 1
+    assert index_bar is not None
+    assert index_bar.close == Decimal("3148.0000")
+
+
+def test_tdx_daily_snapshots_import_is_idempotent(db_session: Session) -> None:
+    service = MarketDataIngestionService(db_session)
+
+    first_result = service.upsert_tdx_daily_snapshots(
+        [
+            TdxDailySnapshotPayload(
+                ts_code="600519.SH",
+                trade_date=date(2026, 5, 25),
+                amount=Decimal("1987654321.00"),
+                turnover_rate=Decimal("0.64"),
+                market_cap=Decimal("2023456789012.00"),
+                raw_payload='{"source":"tdx"}',
+                source_file="/snapshot/20260525.csv",
+            )
+        ]
+    )
+    second_result = service.upsert_tdx_daily_snapshots(
+        [
+            TdxDailySnapshotPayload(
+                ts_code="600519.SH",
+                trade_date=date(2026, 5, 25),
+                amount=Decimal("2987654321.00"),
+                turnover_rate=Decimal("0.74"),
+                market_cap=Decimal("2123456789012.00"),
+                raw_payload='{"source":"tdx","updated":true}',
+                source_file="/snapshot/20260525.csv",
+            )
+        ]
+    )
+
+    snapshot = service.get_tdx_daily_snapshot("600519.SH", date(2026, 5, 25))
+
+    assert first_result.created == 1
+    assert first_result.updated == 0
+    assert second_result.created == 0
+    assert second_result.updated == 1
+    assert service.count_tdx_daily_snapshots() == 1
+    assert snapshot is not None
+    assert snapshot.amount == Decimal("2987654321.0000")

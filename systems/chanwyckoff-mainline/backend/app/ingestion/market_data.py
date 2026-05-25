@@ -9,9 +9,12 @@ from app.models.market_data import (
     DailyBar,
     Instrument,
     IntradayBar,
+    IndexBar,
+    TdxDailySnapshot,
     Theme,
     ThemeConstituent,
     ThemeSnapshot,
+    TradingCalendar,
 )
 
 
@@ -67,6 +70,41 @@ class IntradayBarPayload:
     volume: int
     amount: Decimal
     source: str
+
+
+@dataclass(frozen=True, slots=True)
+class TradingCalendarPayload:
+    exchange: str
+    trade_date: date
+    is_open: bool
+    previous_trade_date: date | None = None
+    next_trade_date: date | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class IndexBarPayload:
+    index_code: str
+    index_name: str
+    trade_date: date
+    adjustment: str
+    open: Decimal
+    high: Decimal
+    low: Decimal
+    close: Decimal
+    source: str
+    volume: int | None = None
+    amount: Decimal | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TdxDailySnapshotPayload:
+    ts_code: str
+    trade_date: date
+    amount: Decimal | None = None
+    turnover_rate: Decimal | None = None
+    market_cap: Decimal | None = None
+    raw_payload: str | None = None
+    source_file: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,6 +271,106 @@ class MarketDataIngestionService:
         self.session.flush()
         return UpsertResult(created=created, updated=updated)
 
+    def upsert_trading_calendars(
+        self, payloads: list[TradingCalendarPayload]
+    ) -> UpsertResult:
+        created = 0
+        updated = 0
+
+        for payload in payloads:
+            calendar = self.get_trading_calendar(payload.exchange, payload.trade_date)
+            if calendar is None:
+                self.session.add(
+                    TradingCalendar(
+                        exchange=payload.exchange,
+                        trade_date=payload.trade_date,
+                        is_open=payload.is_open,
+                        previous_trade_date=payload.previous_trade_date,
+                        next_trade_date=payload.next_trade_date,
+                    )
+                )
+                created += 1
+                continue
+
+            calendar.is_open = payload.is_open
+            calendar.previous_trade_date = payload.previous_trade_date
+            calendar.next_trade_date = payload.next_trade_date
+            updated += 1
+
+        self.session.flush()
+        return UpsertResult(created=created, updated=updated)
+
+    def upsert_index_bars(self, payloads: list[IndexBarPayload]) -> UpsertResult:
+        created = 0
+        updated = 0
+
+        for payload in payloads:
+            index_bar = self.get_index_bar(payload.index_code, payload.trade_date, payload.adjustment)
+            if index_bar is None:
+                self.session.add(
+                    IndexBar(
+                        index_code=payload.index_code,
+                        index_name=payload.index_name,
+                        trade_date=payload.trade_date,
+                        adjustment=payload.adjustment,
+                        open=payload.open,
+                        high=payload.high,
+                        low=payload.low,
+                        close=payload.close,
+                        volume=payload.volume,
+                        amount=payload.amount,
+                        source=payload.source,
+                    )
+                )
+                created += 1
+                continue
+
+            index_bar.index_name = payload.index_name
+            index_bar.open = payload.open
+            index_bar.high = payload.high
+            index_bar.low = payload.low
+            index_bar.close = payload.close
+            index_bar.volume = payload.volume
+            index_bar.amount = payload.amount
+            index_bar.source = payload.source
+            updated += 1
+
+        self.session.flush()
+        return UpsertResult(created=created, updated=updated)
+
+    def upsert_tdx_daily_snapshots(
+        self, payloads: list[TdxDailySnapshotPayload]
+    ) -> UpsertResult:
+        created = 0
+        updated = 0
+
+        for payload in payloads:
+            snapshot = self.get_tdx_daily_snapshot(payload.ts_code, payload.trade_date)
+            if snapshot is None:
+                self.session.add(
+                    TdxDailySnapshot(
+                        ts_code=payload.ts_code,
+                        trade_date=payload.trade_date,
+                        amount=payload.amount,
+                        turnover_rate=payload.turnover_rate,
+                        market_cap=payload.market_cap,
+                        raw_payload=payload.raw_payload,
+                        source_file=payload.source_file,
+                    )
+                )
+                created += 1
+                continue
+
+            snapshot.amount = payload.amount
+            snapshot.turnover_rate = payload.turnover_rate
+            snapshot.market_cap = payload.market_cap
+            snapshot.raw_payload = payload.raw_payload
+            snapshot.source_file = payload.source_file
+            updated += 1
+
+        self.session.flush()
+        return UpsertResult(created=created, updated=updated)
+
     def upsert_themes(self, payloads: list[ThemePayload]) -> UpsertResult:
         created = 0
         updated = 0
@@ -393,6 +531,49 @@ class MarketDataIngestionService:
 
     def count_intraday_bars(self) -> int:
         return self.session.scalar(select(func.count()).select_from(IntradayBar)) or 0
+
+    def get_trading_calendar(self, exchange: str, trade_date: date) -> TradingCalendar | None:
+        return self.session.scalar(
+            select(TradingCalendar).where(
+                TradingCalendar.exchange == exchange,
+                TradingCalendar.trade_date == trade_date,
+            )
+        )
+
+    def count_trading_calendars(self) -> int:
+        return self.session.scalar(select(func.count()).select_from(TradingCalendar)) or 0
+
+    def get_index_bar(
+        self,
+        index_code: str,
+        trade_date: date,
+        adjustment: str,
+    ) -> IndexBar | None:
+        return self.session.scalar(
+            select(IndexBar).where(
+                IndexBar.index_code == index_code,
+                IndexBar.trade_date == trade_date,
+                IndexBar.adjustment == adjustment,
+            )
+        )
+
+    def count_index_bars(self) -> int:
+        return self.session.scalar(select(func.count()).select_from(IndexBar)) or 0
+
+    def get_tdx_daily_snapshot(
+        self,
+        ts_code: str,
+        trade_date: date,
+    ) -> TdxDailySnapshot | None:
+        return self.session.scalar(
+            select(TdxDailySnapshot).where(
+                TdxDailySnapshot.ts_code == ts_code,
+                TdxDailySnapshot.trade_date == trade_date,
+            )
+        )
+
+    def count_tdx_daily_snapshots(self) -> int:
+        return self.session.scalar(select(func.count()).select_from(TdxDailySnapshot)) or 0
 
     def get_theme(self, source: str, theme_code: str) -> Theme | None:
         return self.session.scalar(
