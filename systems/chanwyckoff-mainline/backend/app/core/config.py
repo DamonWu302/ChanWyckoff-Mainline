@@ -16,6 +16,12 @@ class Settings(BaseSettings):
         "chanwyckoff_mainline?charset=utf8mb4"
     )
     scheduler_enabled: bool = False
+    tickflow_base_url: str = "https://api.itick.org"
+    tickflow_api_key: str | None = None
+    eastmoney_base_url: str = "https://quote.eastmoney.com"
+    tdx_snapshot_dir: str | None = None
+    llm_provider: str | None = None
+    llm_api_key: str | None = None
 
     @field_validator("cors_origins", mode="before")
     @classmethod

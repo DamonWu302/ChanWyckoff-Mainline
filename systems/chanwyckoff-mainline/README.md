@@ -13,6 +13,7 @@
 - [产品需求文档 PRD](docs/prd.md)
 - [系统设计文档](docs/system_design.md)
 - [第一阶段实施任务清单](docs/phase1_tasks.md)
+- [账号、密钥与本地配置清单](docs/secrets_and_accounts.md)
 
 ## 技术方向
 
