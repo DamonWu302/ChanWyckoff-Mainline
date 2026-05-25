@@ -5,7 +5,14 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models.market_data import DailyBar, Instrument, IntradayBar
+from app.models.market_data import (
+    DailyBar,
+    Instrument,
+    IntradayBar,
+    Theme,
+    ThemeConstituent,
+    ThemeSnapshot,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +67,40 @@ class IntradayBarPayload:
     volume: int
     amount: Decimal
     source: str
+
+
+@dataclass(frozen=True, slots=True)
+class ThemePayload:
+    source: str
+    theme_code: str
+    theme_name: str
+    theme_type: str
+    is_active: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ThemeConstituentPayload:
+    theme_source: str
+    theme_code: str
+    ts_code: str
+    effective_date: date
+    weight: Decimal | None = None
+    reason: str | None = None
+    is_primary: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class ThemeSnapshotPayload:
+    theme_source: str
+    theme_code: str
+    trade_date: date
+    source: str
+    close: Decimal | None = None
+    pct_change: Decimal | None = None
+    amount: Decimal | None = None
+    rising_count: int | None = None
+    limit_up_count: int | None = None
+    new_high_count: int | None = None
 
 
 class MarketDataIngestionService:
@@ -192,6 +233,126 @@ class MarketDataIngestionService:
         self.session.flush()
         return UpsertResult(created=created, updated=updated)
 
+    def upsert_themes(self, payloads: list[ThemePayload]) -> UpsertResult:
+        created = 0
+        updated = 0
+
+        for payload in payloads:
+            theme = self.get_theme(payload.source, payload.theme_code)
+            if theme is None:
+                self.session.add(
+                    Theme(
+                        source=payload.source,
+                        theme_code=payload.theme_code,
+                        theme_name=payload.theme_name,
+                        theme_type=payload.theme_type,
+                        is_active=payload.is_active,
+                    )
+                )
+                created += 1
+                continue
+
+            theme.theme_name = payload.theme_name
+            theme.theme_type = payload.theme_type
+            theme.is_active = payload.is_active
+            updated += 1
+
+        self.session.flush()
+        return UpsertResult(created=created, updated=updated)
+
+    def upsert_theme_constituents(
+        self, payloads: list[ThemeConstituentPayload]
+    ) -> UpsertResult:
+        created = 0
+        updated = 0
+
+        for payload in payloads:
+            theme = self.get_theme(payload.theme_source, payload.theme_code)
+            if theme is None:
+                raise ValueError(
+                    f"Theme {payload.theme_source}:{payload.theme_code} must exist before "
+                    "importing constituents"
+                )
+            instrument = self.get_instrument(payload.ts_code)
+            if instrument is None:
+                raise ValueError(
+                    f"Instrument {payload.ts_code} must exist before importing constituents"
+                )
+
+            constituent = self.get_theme_constituent(
+                payload.theme_source,
+                payload.theme_code,
+                payload.ts_code,
+                payload.effective_date,
+            )
+            if constituent is None:
+                self.session.add(
+                    ThemeConstituent(
+                        theme_id=theme.id,
+                        instrument_id=instrument.id,
+                        effective_date=payload.effective_date,
+                        weight=payload.weight,
+                        reason=payload.reason,
+                        is_primary=payload.is_primary,
+                    )
+                )
+                created += 1
+                continue
+
+            constituent.weight = payload.weight
+            constituent.reason = payload.reason
+            constituent.is_primary = payload.is_primary
+            updated += 1
+
+        self.session.flush()
+        return UpsertResult(created=created, updated=updated)
+
+    def upsert_theme_snapshots(self, payloads: list[ThemeSnapshotPayload]) -> UpsertResult:
+        created = 0
+        updated = 0
+
+        for payload in payloads:
+            theme = self.get_theme(payload.theme_source, payload.theme_code)
+            if theme is None:
+                raise ValueError(
+                    f"Theme {payload.theme_source}:{payload.theme_code} must exist before "
+                    "importing snapshots"
+                )
+
+            snapshot = self.get_theme_snapshot(
+                payload.theme_source,
+                payload.theme_code,
+                payload.trade_date,
+            )
+            if snapshot is None:
+                self.session.add(
+                    ThemeSnapshot(
+                        theme_id=theme.id,
+                        trade_date=payload.trade_date,
+                        close=payload.close,
+                        pct_change=payload.pct_change,
+                        amount=payload.amount,
+                        rising_count=payload.rising_count,
+                        limit_up_count=payload.limit_up_count,
+                        new_high_count=payload.new_high_count,
+                        source=payload.source,
+                    )
+                )
+                created += 1
+                continue
+
+            snapshot.close = payload.close
+            snapshot.pct_change = payload.pct_change
+            snapshot.amount = payload.amount
+            snapshot.rising_count = payload.rising_count
+            snapshot.limit_up_count = payload.limit_up_count
+            snapshot.new_high_count = payload.new_high_count
+            snapshot.source = payload.source
+            updated += 1
+
+        self.session.flush()
+        return UpsertResult(created=created, updated=updated)
+
     def get_instrument(self, ts_code: str) -> Instrument | None:
         return self.session.scalar(select(Instrument).where(Instrument.ts_code == ts_code))
 
@@ -232,3 +393,52 @@ class MarketDataIngestionService:
 
     def count_intraday_bars(self) -> int:
         return self.session.scalar(select(func.count()).select_from(IntradayBar)) or 0
+
+    def get_theme(self, source: str, theme_code: str) -> Theme | None:
+        return self.session.scalar(
+            select(Theme).where(Theme.source == source, Theme.theme_code == theme_code)
+        )
+
+    def count_themes(self) -> int:
+        return self.session.scalar(select(func.count()).select_from(Theme)) or 0
+
+    def get_theme_constituent(
+        self,
+        theme_source: str,
+        theme_code: str,
+        ts_code: str,
+        effective_date: date,
+    ) -> ThemeConstituent | None:
+        return self.session.scalar(
+            select(ThemeConstituent)
+            .join(Theme)
+            .join(Instrument)
+            .where(
+                Theme.source == theme_source,
+                Theme.theme_code == theme_code,
+                Instrument.ts_code == ts_code,
+                ThemeConstituent.effective_date == effective_date,
+            )
+        )
+
+    def count_theme_constituents(self) -> int:
+        return self.session.scalar(select(func.count()).select_from(ThemeConstituent)) or 0
+
+    def get_theme_snapshot(
+        self,
+        theme_source: str,
+        theme_code: str,
+        trade_date: date,
+    ) -> ThemeSnapshot | None:
+        return self.session.scalar(
+            select(ThemeSnapshot)
+            .join(Theme)
+            .where(
+                Theme.source == theme_source,
+                Theme.theme_code == theme_code,
+                ThemeSnapshot.trade_date == trade_date,
+            )
+        )
+
+    def count_theme_snapshots(self) -> int:
+        return self.session.scalar(select(func.count()).select_from(ThemeSnapshot)) or 0
