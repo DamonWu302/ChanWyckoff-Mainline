@@ -15,6 +15,14 @@ ChanWyckoff Mainline（缠威主线系统）是基于缠论结构、威科夫量
 ## 前端目录结构
 
 ```text
+backend/
+  app/
+    api/                    FastAPI routers
+    core/                   配置与环境变量
+    db/                     SQLAlchemy Base、engine、session
+    jobs/                   APScheduler 调度入口
+  alembic/                  数据库迁移脚本
+  tests/                    后端测试
 app/
   globals.css              全局设计变量、基础样式和 temp 原型迁移样式
   layout.tsx               Next.js 根布局
@@ -29,11 +37,24 @@ components/
   layout/                  AppShell、侧边栏、页面框架
   ui/                      Button、Panel、Metric、Status、Table、Tabs、Field 等基础组件
   pages/                   页面级组合组件
+  system/                  系统级联调组件，如后端健康检查
   design-system/           设计系统预览组件
 lib/
   cn.ts                    className 合并工具
   navigation.ts            导航配置
+scripts/
+  run_backend.sh           启动 FastAPI 开发服务
+  run_frontend.sh          启动 Next.js 开发服务
 ```
+
+## 后端工程规范
+
+- 后端使用 FastAPI，入口为 `backend/app/main.py`。
+- API 路由统一挂载在 `/api` 前缀下。
+- 配置统一通过 `backend/app/core/config.py` 的 pydantic settings 管理。
+- 数据库使用 MySQL，SQLAlchemy 负责 ORM/连接，Alembic 负责迁移。
+- APScheduler 只作为调度生命周期骨架；真实数据任务在后续里程碑接入。
+- 后端测试优先覆盖外部行为，例如 `/api/health` 的响应，而不是测试内部实现细节。
 
 ## 设计系统架构
 
@@ -73,4 +94,3 @@ lib/
 - 表格需要保持紧凑、可扫描，状态标签和数字建议使用等宽字体。
 - LLM 只用于解释和复盘，不应在前端文案中暗示它能直接决定交易。
 - 任何与交易相关的页面必须明确展示规则证据、风险约束和失效条件。
-

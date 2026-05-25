@@ -21,3 +21,30 @@
 - 前端：Next.js, React, TypeScript
 - 行情主源：TickFlow
 - 题材源：东方财富/AkShare
+
+## 本地开发
+
+后端：
+
+```bash
+cd systems/chanwyckoff-mainline/backend
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+cp .env.example .env
+../scripts/run_backend.sh
+```
+
+前端：
+
+```bash
+cd systems/chanwyckoff-mainline
+npm install
+npm run dev
+```
+
+健康检查：
+
+```bash
+curl http://127.0.0.1:8000/api/health
+```

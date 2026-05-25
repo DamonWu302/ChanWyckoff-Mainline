@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { ButtonLink } from "@/components/ui/Button";
 import { Panel } from "@/components/ui/Panel";
 import { Status } from "@/components/ui/Status";
+import { BackendHealth } from "@/components/system/BackendHealth";
 
 const chain = [
   ["大盘环境", "risk_on / neutral / risk_off 作为最高交易闸门"],
@@ -61,7 +62,12 @@ export function OverviewPage() {
   return (
     <AppShell note="第一阶段是决策辅助系统：规则化信号决定候选与仓位，LLM 只负责解释、复盘和失败样本归纳。">
       <PageHeader
-        actions={<ButtonLink href="/today-operations" variant="primary">进入今日作战台</ButtonLink>}
+        actions={
+          <>
+            <BackendHealth />
+            <ButtonLink href="/today-operations" variant="primary">进入今日作战台</ButtonLink>
+          </>
+        }
         eyebrow="Desktop operations"
         lead="系统按核心链路组织桌面工作区：大盘环境、题材主线、趋势容量核心、30 分钟结构、工程化三买、仓位风控、回测与复盘。"
         title="缠威主线系统：从大盘到三买信号的操作工作台"
@@ -97,4 +103,3 @@ export function OverviewPage() {
     </AppShell>
   );
 }
-

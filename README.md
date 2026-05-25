@@ -14,10 +14,12 @@
 systems/
   chanwyckoff-mainline/
     app/
+    backend/
     components/
     docs/
       system_design.md
       phase1_tasks.md
+    scripts/
 ```
 
 后续新增内容建议按意图放置：
