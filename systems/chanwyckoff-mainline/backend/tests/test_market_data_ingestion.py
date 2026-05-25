@@ -1,5 +1,5 @@
 from collections.abc import Iterator
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 import pytest
@@ -7,7 +7,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.base import Base
-from app.ingestion.market_data import DailyBarPayload, InstrumentPayload, MarketDataIngestionService
+from app.ingestion.market_data import (
+    DailyBarPayload,
+    InstrumentPayload,
+    IntradayBarPayload,
+    MarketDataIngestionService,
+)
 
 
 @pytest.fixture()
@@ -116,3 +121,65 @@ def test_qfq_daily_bars_import_is_idempotent(db_session: Session) -> None:
     assert service.count_daily_bars() == 1
     assert daily_bar is not None
     assert daily_bar.close == Decimal("1618.0000")
+
+
+def test_30m_bars_import_is_idempotent(db_session: Session) -> None:
+    service = MarketDataIngestionService(db_session)
+    service.upsert_instruments(
+        [
+            InstrumentPayload(
+                symbol="600519",
+                exchange="SH",
+                name="贵州茅台",
+                market_board="main_board",
+                is_active=True,
+                is_st=False,
+            )
+        ]
+    )
+
+    bar_time = datetime(2026, 5, 25, 10, 0, tzinfo=timezone.utc)
+    first_result = service.upsert_intraday_bars(
+        [
+            IntradayBarPayload(
+                ts_code="600519.SH",
+                bar_time=bar_time,
+                frequency="30m",
+                adjustment="qfq",
+                open=Decimal("1601.00"),
+                high=Decimal("1608.00"),
+                low=Decimal("1599.00"),
+                close=Decimal("1605.00"),
+                volume=123400,
+                amount=Decimal("19876543.21"),
+                source="tickflow",
+            )
+        ]
+    )
+    second_result = service.upsert_intraday_bars(
+        [
+            IntradayBarPayload(
+                ts_code="600519.SH",
+                bar_time=bar_time,
+                frequency="30m",
+                adjustment="qfq",
+                open=Decimal("1601.00"),
+                high=Decimal("1611.00"),
+                low=Decimal("1599.00"),
+                close=Decimal("1610.00"),
+                volume=223400,
+                amount=Decimal("29876543.21"),
+                source="tickflow",
+            )
+        ]
+    )
+
+    intraday_bar = service.get_intraday_bar("600519.SH", bar_time, "30m", "qfq")
+
+    assert first_result.created == 1
+    assert first_result.updated == 0
+    assert second_result.created == 0
+    assert second_result.updated == 1
+    assert service.count_intraday_bars() == 1
+    assert intraday_bar is not None
+    assert intraday_bar.close == Decimal("1610.0000")

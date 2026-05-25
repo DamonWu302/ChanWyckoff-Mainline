@@ -1,11 +1,11 @@
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models.market_data import DailyBar, Instrument
+from app.models.market_data import DailyBar, Instrument, IntradayBar
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +45,21 @@ class DailyBarPayload:
     source: str
     turnover_rate: Decimal | None = None
     market_cap: Decimal | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class IntradayBarPayload:
+    ts_code: str
+    bar_time: datetime
+    frequency: str
+    adjustment: str
+    open: Decimal
+    high: Decimal
+    low: Decimal
+    close: Decimal
+    volume: int
+    amount: Decimal
+    source: str
 
 
 class MarketDataIngestionService:
@@ -131,6 +146,52 @@ class MarketDataIngestionService:
         self.session.flush()
         return UpsertResult(created=created, updated=updated)
 
+    def upsert_intraday_bars(self, payloads: list[IntradayBarPayload]) -> UpsertResult:
+        created = 0
+        updated = 0
+
+        for payload in payloads:
+            instrument = self.get_instrument(payload.ts_code)
+            if instrument is None:
+                raise ValueError(f"Instrument {payload.ts_code} must exist before importing bars")
+
+            intraday_bar = self.get_intraday_bar(
+                payload.ts_code,
+                payload.bar_time,
+                payload.frequency,
+                payload.adjustment,
+            )
+            if intraday_bar is None:
+                self.session.add(
+                    IntradayBar(
+                        instrument_id=instrument.id,
+                        bar_time=payload.bar_time,
+                        frequency=payload.frequency,
+                        adjustment=payload.adjustment,
+                        open=payload.open,
+                        high=payload.high,
+                        low=payload.low,
+                        close=payload.close,
+                        volume=payload.volume,
+                        amount=payload.amount,
+                        source=payload.source,
+                    )
+                )
+                created += 1
+                continue
+
+            intraday_bar.open = payload.open
+            intraday_bar.high = payload.high
+            intraday_bar.low = payload.low
+            intraday_bar.close = payload.close
+            intraday_bar.volume = payload.volume
+            intraday_bar.amount = payload.amount
+            intraday_bar.source = payload.source
+            updated += 1
+
+        self.session.flush()
+        return UpsertResult(created=created, updated=updated)
+
     def get_instrument(self, ts_code: str) -> Instrument | None:
         return self.session.scalar(select(Instrument).where(Instrument.ts_code == ts_code))
 
@@ -150,3 +211,24 @@ class MarketDataIngestionService:
 
     def count_daily_bars(self) -> int:
         return self.session.scalar(select(func.count()).select_from(DailyBar)) or 0
+
+    def get_intraday_bar(
+        self,
+        ts_code: str,
+        bar_time: datetime,
+        frequency: str,
+        adjustment: str,
+    ) -> IntradayBar | None:
+        return self.session.scalar(
+            select(IntradayBar)
+            .join(Instrument)
+            .where(
+                Instrument.ts_code == ts_code,
+                IntradayBar.bar_time == bar_time,
+                IntradayBar.frequency == frequency,
+                IntradayBar.adjustment == adjustment,
+            )
+        )
+
+    def count_intraday_bars(self) -> int:
+        return self.session.scalar(select(func.count()).select_from(IntradayBar)) or 0
