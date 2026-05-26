@@ -30,6 +30,18 @@ class BreakoutBar:
 
 
 @dataclass(frozen=True, slots=True)
+class PullbackBar:
+    bar_time: datetime
+    open: Decimal
+    high: Decimal
+    low: Decimal
+    close: Decimal
+    volume: int
+    amount: Decimal
+    atr: Decimal
+
+
+@dataclass(frozen=True, slots=True)
 class WyckoffAssessment:
     background: str
     features: dict[str, str]
@@ -90,6 +102,105 @@ class ThirdBuySignalService:
             wyckoff=wyckoff,
         )
 
+    def evaluate_pullback(
+        self,
+        structure: ThirdBuyStructure,
+        breakout: BreakoutBar,
+        pullbacks: list[PullbackBar],
+    ) -> ThirdBuySignal | None:
+        if not pullbacks:
+            return None
+        if self.evaluate_breakout(structure, breakout) is None:
+            return None
+        if len(pullbacks) > 8:
+            return self._failed_signal(
+                structure,
+                breakout,
+                pullbacks[-1].bar_time,
+                "pullback_timeout",
+                "confirmation_expired",
+            )
+
+        heavy_volume_breakdown = any(
+            bar.close < structure.upper and bar.volume >= structure.platform_avg_volume
+            for bar in pullbacks
+        )
+        if heavy_volume_breakdown:
+            return self._failed_signal(
+                structure,
+                breakout,
+                pullbacks[-1].bar_time,
+                "heavy_volume_close_back_inside",
+                "supply_returned",
+            )
+
+        effective_breakdown = any(bar.close < structure.upper for bar in pullbacks)
+        if effective_breakdown:
+            return self._failed_signal(
+                structure,
+                breakout,
+                pullbacks[-1].bar_time,
+                "close_back_inside",
+                "breakout_needs_repair",
+            )
+
+        touched_support = any(self._touches_upper_support(structure, bar) for bar in pullbacks)
+        if not touched_support:
+            return None
+
+        max_pullback_volume = max(bar.volume for bar in pullbacks)
+        volume_is_shrinking = (
+            max_pullback_volume < breakout.volume
+            and max_pullback_volume < structure.platform_avg_volume
+        )
+        if not volume_is_shrinking:
+            return None
+
+        wyckoff = self._wyckoff_for_confirmed_pullback(structure, breakout, pullbacks)
+        return ThirdBuySignal(
+            ts_code=structure.ts_code,
+            state="confirmed_3buy",
+            action="upgrade_position",
+            signal_time=pullbacks[-1].bar_time,
+            structure_score=structure.quality_score,
+            breakout_strength=(breakout.close - structure.upper) / structure.upper,
+            volume_ratio=Decimal(breakout.volume) / Decimal(structure.platform_avg_volume),
+            wyckoff=wyckoff,
+        )
+
+    def _failed_signal(
+        self,
+        structure: ThirdBuyStructure,
+        breakout: BreakoutBar,
+        signal_time: datetime,
+        failure_reason: str,
+        forecast: str,
+    ) -> ThirdBuySignal:
+        breakout_strength = (breakout.close - structure.upper) / structure.upper
+        volume_ratio = Decimal(breakout.volume) / Decimal(structure.platform_avg_volume)
+        return ThirdBuySignal(
+            ts_code=structure.ts_code,
+            state="failed_3buy",
+            action="filter",
+            signal_time=signal_time,
+            structure_score=structure.quality_score,
+            breakout_strength=breakout_strength,
+            volume_ratio=volume_ratio,
+            wyckoff=WyckoffAssessment(
+                background="supply_returned" if "volume" in failure_reason else "confirmation_failed",
+                features={
+                    "failure_reason": failure_reason,
+                    "breakout_volume_ratio": f"{volume_ratio:.2f}",
+                },
+                forecast=forecast,
+                score=25,
+            ),
+        )
+
+    def _touches_upper_support(self, structure: ThirdBuyStructure, bar: PullbackBar) -> bool:
+        tolerance = max(bar.atr * Decimal("0.50"), structure.upper * Decimal("0.02"))
+        return bar.low <= structure.upper + tolerance and bar.low >= structure.upper - tolerance
+
     def _wyckoff_for_breakout(
         self,
         structure: ThirdBuyStructure,
@@ -126,5 +237,27 @@ class ThirdBuySignalService:
                 "close_quality": close_quality,
             },
             forecast="wait_pullback_confirmation",
+            score=score,
+        )
+
+    def _wyckoff_for_confirmed_pullback(
+        self,
+        structure: ThirdBuyStructure,
+        breakout: BreakoutBar,
+        pullbacks: list[PullbackBar],
+    ) -> WyckoffAssessment:
+        breakout_strength = (breakout.close - structure.upper) / structure.upper
+        volume_ratio = Decimal(breakout.volume) / Decimal(structure.platform_avg_volume)
+        base = self._wyckoff_for_breakout(structure, breakout_strength, volume_ratio)
+        score = min(100, base.score + 12)
+        return WyckoffAssessment(
+            background=base.background,
+            features={
+                **base.features,
+                "pullback_volume": "shrinking",
+                "support_quality": "accepted_above_upper",
+                "pullback_window": f"{len(pullbacks)}_bars",
+            },
+            forecast="continuation_expected",
             score=score,
         )
