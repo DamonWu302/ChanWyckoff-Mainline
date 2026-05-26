@@ -61,6 +61,16 @@ def record_manual_review(
     return _record_to_dict(record)
 
 
+@router.get("/stats/failures")
+def get_failure_distribution(db: Session = Depends(get_db)) -> dict[str, object]:
+    distribution = SignalReviewService(db).failure_distribution()
+    return {
+        "manual_failure_reasons": distribution.manual_failure_reasons,
+        "llm_failure_types": distribution.llm_failure_types,
+        "total_failed_records": distribution.total_failed_records,
+    }
+
+
 @router.post("/{signal_uid}/llm")
 def attach_llm_review(
     signal_uid: str,

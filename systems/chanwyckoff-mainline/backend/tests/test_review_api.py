@@ -111,3 +111,35 @@ def test_review_api_accepts_signal_performance(client: TestClient) -> None:
     assert body["return_pct"] == " -0.021500".strip()
     assert body["max_drawdown_pct"] == "0.034000"
     assert body["holding_bars"] == 8
+
+
+def test_review_stats_endpoint_returns_failure_distribution(client: TestClient) -> None:
+    for index, failure_reason in enumerate(["supply_returned", "time_stop", "supply_returned"]):
+        client.post(
+            "/api/reviews/manual",
+            json={
+                "signal_uid": f"60010{index}.SH-20260526T140000-failed",
+                "ts_code": f"60010{index}.SH",
+                "signal_time": datetime(2026, 5, 26, 14, index, tzinfo=timezone.utc).isoformat(),
+                "rule_state": "failed_3buy",
+                "suggested_action": "filter",
+                "manual_status": "skipped",
+                "note": "失败样本。",
+                "failure_reason": failure_reason,
+                "return_pct": None,
+                "max_drawdown_pct": None,
+                "holding_bars": None,
+            },
+        )
+
+    response = client.get("/api/reviews/stats/failures")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "manual_failure_reasons": {
+            "supply_returned": 2,
+            "time_stop": 1,
+        },
+        "llm_failure_types": {},
+        "total_failed_records": 3,
+    }

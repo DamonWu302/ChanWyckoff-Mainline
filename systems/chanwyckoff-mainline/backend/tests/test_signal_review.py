@@ -113,3 +113,46 @@ def test_llm_review_adds_explanation_without_changing_rule_result(db_session: Se
     assert fetched.llm_reviews[0].id == review.id
     assert fetched.llm_reviews[0].failure_type == "heavy_volume_close_back_inside"
     assert fetched.llm_reviews[0].attempted_rule_state == "confirmed_3buy"
+
+
+def test_failure_distribution_counts_manual_and_llm_failure_types(db_session: Session) -> None:
+    service = SignalReviewService(db_session)
+    for index, failure_reason in enumerate(["supply_returned", "time_stop", "supply_returned"]):
+        signal_uid = f"60000{index}.SH-20260526T140000-failed"
+        service.record_manual_review(
+            ManualReviewPayload(
+                signal_uid=signal_uid,
+                ts_code=f"60000{index}.SH",
+                signal_time=datetime(2026, 5, 26, 14, index, tzinfo=timezone.utc),
+                rule_state="failed_3buy",
+                suggested_action="filter",
+                manual_status="skipped",
+                note="失败样本。",
+                failure_reason=failure_reason,
+                return_pct=None,
+                max_drawdown_pct=None,
+                holding_bars=None,
+            )
+        )
+    service.attach_llm_review(
+        LlmReviewPayload(
+            signal_uid="600000.SH-20260526T140000-failed",
+            provider="deepseek",
+            model="deepseek-chat",
+            background_summary="背景",
+            feature_summary="特征",
+            forecast_summary="预判",
+            failure_type="heavy_volume_close_back_inside",
+        )
+    )
+
+    distribution = service.failure_distribution()
+
+    assert distribution.manual_failure_reasons == {
+        "supply_returned": 2,
+        "time_stop": 1,
+    }
+    assert distribution.llm_failure_types == {
+        "heavy_volume_close_back_inside": 1,
+    }
+    assert distribution.total_failed_records == 3

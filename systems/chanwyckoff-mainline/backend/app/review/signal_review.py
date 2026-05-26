@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+from typing import Iterable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -34,6 +35,13 @@ class LlmReviewPayload:
     failure_type: str | None
     attempted_rule_state: str | None = None
     attempted_action: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FailureDistribution:
+    manual_failure_reasons: dict[str, int]
+    llm_failure_types: dict[str, int]
+    total_failed_records: int
 
 
 class SignalReviewService:
@@ -102,3 +110,28 @@ class SignalReviewService:
                 selectinload(SignalReviewRecord.llm_reviews),
             )
         )
+
+    def failure_distribution(self) -> FailureDistribution:
+        records = self.session.scalars(select(SignalReviewRecord)).all()
+        llm_reviews = self.session.scalars(select(SignalLlmReview)).all()
+        manual_failure_reasons = self._count(
+            record.failure_reason
+            for record in records
+            if record.failure_reason is not None
+        )
+        llm_failure_types = self._count(
+            review.failure_type
+            for review in llm_reviews
+            if review.failure_type is not None
+        )
+        return FailureDistribution(
+            manual_failure_reasons=manual_failure_reasons,
+            llm_failure_types=llm_failure_types,
+            total_failed_records=sum(manual_failure_reasons.values()),
+        )
+
+    def _count(self, values: Iterable[str]) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for value in values:
+            counts[value] = counts.get(value, 0) + 1
+        return dict(sorted(counts.items(), key=lambda item: (-item[1], item[0])))
