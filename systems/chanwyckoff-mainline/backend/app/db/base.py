@@ -18,3 +18,4 @@ from app.models.market_data import (  # noqa: E402,F401
     ThemeSnapshot,
     TradingCalendar,
 )
+from app.models import review as review_models  # noqa: E402,F401
