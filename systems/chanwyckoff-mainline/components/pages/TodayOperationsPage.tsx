@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/layout/AppShell";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button, ButtonLink } from "@/components/ui/Button";
@@ -9,83 +9,71 @@ import { MiniChart } from "@/components/ui/Charts";
 import { Metric } from "@/components/ui/Metric";
 import { Panel } from "@/components/ui/Panel";
 import { Status } from "@/components/ui/Status";
+import {
+  type DashboardSignal,
+  fallbackDashboard,
+  fetchDashboardSnapshot,
+} from "@/lib/dashboard";
 
-const candidates = [
-  {
-    stock: "机器人核心 Alpha",
-    sub: "主板 / 前复权",
-    themeKey: "robotics",
-    theme: "机器人",
-    themeVariant: "good" as const,
-    stage: "confirmed_3buy",
-    stageVariant: "good" as const,
-    score: 86,
-    core: "#1",
-    evidence: "突破放量，回踩缩量，未有效回中枢",
-    actionHref: "/signal-detail",
-    actionLabel: "详情",
-  },
-  {
-    stock: "CPO 核心 Beta",
-    sub: "主板 / 前复权",
-    themeKey: "cpo",
-    theme: "CPO",
-    themeVariant: "info" as const,
-    stage: "proto_3buy",
-    stageVariant: "info" as const,
-    score: 78,
-    core: "#2",
-    evidence: "30 分钟收盘突破，上沿测试次数充足",
-    actionHref: "/signal-detail",
-    actionLabel: "详情",
-  },
-  {
-    stock: "算力观察 Gamma",
-    sub: "主板 / 前复权",
-    themeKey: "compute",
-    theme: "算力",
-    themeVariant: "warn" as const,
-    stage: "failed_3buy",
-    stageVariant: "danger" as const,
-    score: 41,
-    core: "#5",
-    evidence: "带量跌回中枢，供应重新进入",
-    actionHref: "/review",
-    actionLabel: "复盘",
-  },
-  {
-    stock: "机器人跟踪 Delta",
-    sub: "主板 / 前复权",
-    themeKey: "robotics",
-    theme: "机器人",
-    themeVariant: "good" as const,
-    stage: "proto_3buy",
-    stageVariant: "info" as const,
-    score: 64,
-    core: "#3",
-    evidence: "突破质量合格，等待 1-8 根 30m 回踩验证",
-    actionHref: "/signal-detail",
-    actionLabel: "详情",
-  },
-];
+type DrawerSignal = DashboardSignal | null;
 
-type DrawerSignal = (typeof candidates)[number] | null;
+function signalVariant(state: DashboardSignal["state"]) {
+  if (state === "confirmed_3buy") return "good";
+  if (state === "failed_3buy") return "danger";
+  return "info";
+}
+
+function themeVariant(index: number) {
+  return index === 0 ? "good" : index === 1 ? "info" : "warn";
+}
+
+function formatAmount(amount: number) {
+  return `${(amount / 100000000).toFixed(1)} 亿`;
+}
+
+const evidenceText: Record<string, string> = {
+  index_repair_without_full_risk_on: "指数修复，但尚未进入完整 risk_on",
+  breadth_improving_but_not_expanding: "赚钱效应改善，扩散强度仍需确认",
+  confirmed_mainline_required: "只处理确认主线与核心票信号",
+  breakout_expansion_pullback_shrinking: "突破放量，回踩缩量承接",
+  breakout_volume_confirmed: "突破量能确认，等待回踩",
+  supply_returned_on_volume: "供应带量重回结构内",
+};
+
+function labelEvidence(value: string) {
+  return evidenceText[value] ?? value;
+}
 
 export function TodayOperationsPage() {
+  const [snapshot, setSnapshot] = useState(fallbackDashboard);
   const [theme, setTheme] = useState("all");
   const [stage, setStage] = useState("all");
   const [score, setScore] = useState("all");
   const [drawerSignal, setDrawerSignal] = useState<DrawerSignal>(null);
   const [copied, setCopied] = useState(false);
 
+  useEffect(() => {
+    let mounted = true;
+    fetchDashboardSnapshot()
+      .then((nextSnapshot) => {
+        if (mounted) setSnapshot(nextSnapshot);
+      })
+      .catch(() => {
+        if (mounted) setSnapshot(fallbackDashboard);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   const filtered = useMemo(() => {
-    return candidates.filter((candidate) => {
-      const themeOk = theme === "all" || candidate.themeKey === theme;
-      const stageOk = stage === "all" || candidate.stage === stage;
+    return snapshot.signals.filter((candidate) => {
+      const themeOk = theme === "all" || candidate.theme === theme;
+      const stageOk = stage === "all" || candidate.state === stage;
       const minScore = score === "all" ? 0 : Number(score);
       return themeOk && stageOk && candidate.score >= minScore;
     });
-  }, [theme, stage, score]);
+  }, [snapshot.signals, theme, stage, score]);
 
   async function copyRule() {
     const text = "risk_on -> confirmed_mainline -> core_rank <= 3 -> confirmed_3buy -> risk cap";
@@ -113,33 +101,38 @@ export function TodayOperationsPage() {
       />
 
       <section className="grid cols-4 section-gap">
-        <Metric foot="进攻仓位需等待主线与结构共振" label="Market regime" value="neutral" />
-        <Metric foot="confirmed 1 / emerging 2" label="Active mainlines" value="3" />
+        <Metric
+          foot={snapshot.market_regime.attack_allowed ? "允许主线核心参与" : "新信号压制"}
+          label="Market regime"
+          value={snapshot.market_regime.state}
+        />
+        <Metric foot={`交易日 ${snapshot.trade_date}`} label="Active mainlines" value={String(snapshot.mainlines.length)} />
         <Metric foot="按筛选实时更新" label="3buy candidates" value={String(filtered.length)} />
-        <Metric foot="neutral 下总仓位上限示例" label="Exposure gate" value="≤ 45%" />
+        <Metric
+          foot={`${snapshot.market_regime.state} 下总仓位上限`}
+          label="Exposure gate"
+          value={`≤ ${snapshot.market_regime.recommended_exposure_pct}%`}
+        />
       </section>
 
       <section className="grid ops today-workspace">
         <div className="ops-side">
-          <Panel action={<Status variant="warn">neutral</Status>} bodyClassName="stack" title="大盘闸门">
+          <Panel action={<Status variant="warn">{snapshot.market_regime.state}</Status>} bodyClassName="stack" title="大盘闸门">
             <MiniChart />
             <ul className="rule-list">
-              <li><span className="mono subtle">index</span><span>上证 / 全 A 没有同步 risk_on，赚钱效应处于修复中。</span></li>
-              <li><span className="mono subtle">breadth</span><span>上涨家数与成交额扩张未形成连续性。</span></li>
-              <li><span className="mono subtle">gate</span><span>允许跟踪强主线确认信号，禁止普通后排追涨。</span></li>
+              {snapshot.market_regime.evidence.map((item) => (
+                <li key={item}><span className="mono subtle">gate</span><span>{labelEvidence(item)}</span></li>
+              ))}
             </ul>
           </Panel>
 
           <Panel action={<Link className="link-button" href="/theme-mainlines">钻取</Link>} bodyClassName="mainline-list" title="主线队列">
-            {[
-              ["confirmed_mainline", "机器人", "抗跌 + 转强领涨 + 成交额扩张"],
-              ["emerging_leader", "CPO", "放量修复，核心票领先"],
-              ["resistant_theme", "算力", "指数下跌抗跌，领涨未确认"],
-            ].map(([meta, title, body]) => (
-              <div className="mainline-item" key={title}>
-                <div className="mainline-meta">{meta}</div>
-                <strong>{title}</strong>
-                <p>{body}</p>
+            {snapshot.mainlines.map((mainline) => (
+              <div className="mainline-item" key={mainline.theme}>
+                <div className="mainline-meta">{mainline.label}</div>
+                <strong>{mainline.theme}</strong>
+                <p>强度 {mainline.strength_score}，成交额放大 {mainline.amount_expansion}</p>
+                <p>{mainline.core_stocks.map((stock) => `#${stock.rank} ${stock.name}`).join(" / ")}</p>
               </div>
             ))}
           </Panel>
@@ -151,21 +144,15 @@ export function TodayOperationsPage() {
             <div className="filters">
               <select aria-label="题材筛选" onChange={(event) => setTheme(event.target.value)} value={theme}>
                 <option value="all">全部题材</option>
-                <option value="robotics">机器人</option>
-                <option value="cpo">CPO</option>
-                <option value="compute">算力</option>
+                {snapshot.filters.themes.map((item) => <option key={item} value={item}>{item}</option>)}
               </select>
               <select aria-label="状态筛选" onChange={(event) => setStage(event.target.value)} value={stage}>
                 <option value="all">全部状态</option>
-                <option value="proto_3buy">proto_3buy</option>
-                <option value="confirmed_3buy">confirmed_3buy</option>
-                <option value="failed_3buy">failed_3buy</option>
+                {snapshot.filters.states.map((item) => <option key={item} value={item}>{item}</option>)}
               </select>
               <select aria-label="分数筛选" onChange={(event) => setScore(event.target.value)} value={score}>
                 <option value="all">全部分数</option>
-                <option value="80">≥80</option>
-                <option value="60">≥60</option>
-                <option value="40">≥40</option>
+                {snapshot.filters.score_floor.map((item) => <option key={item} value={item}>≥{item}</option>)}
               </select>
             </div>
           </div>
@@ -181,19 +168,21 @@ export function TodayOperationsPage() {
                 <col className="col-action" />
               </colgroup>
               <thead>
-                <tr><th>股票</th><th>主线</th><th>状态</th><th>分数</th><th>核心</th><th>量价证据</th><th>动作</th></tr>
+                <tr><th>股票</th><th>主线</th><th>状态</th><th>分数</th><th>成交额</th><th>量价证据</th><th>动作</th></tr>
               </thead>
               <tbody>
                 {filtered.map((candidate) => (
-                  <tr key={candidate.stock}>
-                    <td><strong>{candidate.stock}</strong><div className="subtle mono">{candidate.sub}</div></td>
-                    <td><Status variant={candidate.themeVariant}>{candidate.theme}</Status></td>
-                    <td><Status variant={candidate.stageVariant}>{candidate.stage}</Status></td>
+                  <tr key={candidate.ts_code}>
+                    <td><strong>{candidate.name}</strong><div className="subtle mono">{candidate.ts_code}</div></td>
+                    <td><Status variant={themeVariant(snapshot.filters.themes.indexOf(candidate.theme))}>{candidate.theme}</Status></td>
+                    <td><Status variant={signalVariant(candidate.state)}>{candidate.state}</Status></td>
                     <td className="mono">{candidate.score}</td>
-                    <td className="mono">{candidate.core}</td>
-                    <td className="evidence-cell">{candidate.evidence}</td>
+                    <td className="mono">{formatAmount(candidate.amount)}</td>
+                    <td className="evidence-cell">{labelEvidence(candidate.evidence.volume_price)}</td>
                     <td className="row-actions">
-                      <Link className="link-button" href={candidate.actionHref}>{candidate.actionLabel}</Link>
+                      <Link className="link-button" href={candidate.state === "failed_3buy" ? "/review" : "/signal-detail"}>
+                        {candidate.suggested_action}
+                      </Link>
                       <button className="link-button" onClick={() => setDrawerSignal(candidate)} type="button">摘要</button>
                     </td>
                   </tr>
@@ -208,19 +197,21 @@ export function TodayOperationsPage() {
         <div className="panel-header">
           <div>
             <div className="eyebrow">Signal summary</div>
-            <h2>{drawerSignal?.stock ?? "信号摘要"}</h2>
+            <h2>{drawerSignal?.name ?? "信号摘要"}</h2>
           </div>
           <Button onClick={() => setDrawerSignal(null)} type="button" variant="ghost">关闭</Button>
         </div>
         <div className="drawer-content stack">
           <div className="split">
-            <Status variant={drawerSignal?.stageVariant ?? "good"}>{drawerSignal?.stage ?? "confirmed_3buy"}</Status>
-            <Status variant={drawerSignal?.themeVariant ?? "info"}>{drawerSignal?.theme ?? "机器人"}</Status>
+            <Status variant={drawerSignal ? signalVariant(drawerSignal.state) : "good"}>{drawerSignal?.state ?? "confirmed_3buy"}</Status>
+            <Status variant={drawerSignal ? themeVariant(snapshot.filters.themes.indexOf(drawerSignal.theme)) : "info"}>
+              {drawerSignal?.theme ?? "机器人"}
+            </Status>
           </div>
           <ul className="rule-list">
-            <li><span className="mono subtle">gate</span><span>neutral，只允许主线核心和高分结构进入计划。</span></li>
-            <li><span className="mono subtle">risk</span><span>proto 约 10%，confirmed 20%-25%， exceptional 不超过单票 30%。</span></li>
-            <li><span className="mono subtle">invalid</span><span>有效跌回中枢、供应带量重入或 1-8 根 30m 内确认失败。</span></li>
+            <li><span className="mono subtle">structure</span><span>{drawerSignal?.evidence.structure ?? "30m_platform_upper_breakout"}</span></li>
+            <li><span className="mono subtle">price</span><span>{labelEvidence(drawerSignal?.evidence.volume_price ?? "breakout_expansion_pullback_shrinking")}</span></li>
+            <li><span className="mono subtle">wyckoff</span><span>{drawerSignal?.evidence.wyckoff_forecast ?? "continuation_expected"}</span></li>
           </ul>
           <ButtonLink href="/signal-detail" variant="primary">打开完整结构</ButtonLink>
         </div>
@@ -228,4 +219,3 @@ export function TodayOperationsPage() {
     </AppShell>
   );
 }
-
