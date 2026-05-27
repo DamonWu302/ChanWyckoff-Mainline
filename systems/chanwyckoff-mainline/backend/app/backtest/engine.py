@@ -21,6 +21,7 @@ class SignalCandidate:
     structure_upper: Decimal
     structure_lower: Decimal
     target_price: Decimal
+    theme: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +47,9 @@ class BacktestConfig:
     stamp_tax_rate: Decimal
     slippage_rate: Decimal
     max_holding_bars: int
+    max_total_position_pct: Decimal | None = None
+    max_theme_position_pct: Decimal | None = None
+    max_symbol_position_pct: Decimal | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +61,7 @@ class BacktestParameterSet:
 @dataclass(frozen=True, slots=True)
 class BacktestTrade:
     ts_code: str
+    theme: str | None
     signal_state: SignalState
     wyckoff_score: int
     entry_time: datetime
@@ -66,6 +71,15 @@ class BacktestTrade:
     exit_reason: ExitReason
     holding_bars: int
     net_return: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class SkippedSignal:
+    ts_code: str
+    theme: str | None
+    signal_state: SignalState
+    signal_time: datetime
+    reason: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +93,7 @@ class PerformanceSlice:
 @dataclass(frozen=True, slots=True)
 class BacktestReport:
     trades: list[BacktestTrade]
+    skipped_signals: list[SkippedSignal]
     total_trades: int
     win_rate: Decimal
     mean_return: Decimal
@@ -117,14 +132,15 @@ class BacktestEngine:
     ) -> BacktestReport:
         signals = self._signals_in_range(signals, start, end)
         bars_by_symbol = self._bars_by_symbol(bars)
-        trades = [
-            trade
+        candidates = [
+            (signal, trade)
             for signal in sorted(signals, key=lambda item: item.signal_time)
             if signal.state != "failed_3buy"
             for trade in [self._simulate_signal(signal, bars_by_symbol.get(signal.ts_code, []))]
             if trade is not None
         ]
-        return self._build_report(trades)
+        trades, skipped_signals = self._apply_capacity_limits(candidates)
+        return self._build_report(trades, skipped_signals)
 
     def run_grid_search(
         self,
@@ -196,6 +212,7 @@ class BacktestEngine:
 
         return BacktestTrade(
             ts_code=signal.ts_code,
+            theme=signal.theme,
             signal_state=signal.state,
             wyckoff_score=signal.wyckoff_score,
             entry_time=entry_bar.bar_time,
@@ -207,10 +224,16 @@ class BacktestEngine:
             net_return=self._net_return(entry_price, exit_price),
         )
 
-    def _build_report(self, trades: list[BacktestTrade]) -> BacktestReport:
+    def _build_report(
+        self,
+        trades: list[BacktestTrade],
+        skipped_signals: list[SkippedSignal] | None = None,
+    ) -> BacktestReport:
+        skipped_signals = skipped_signals or []
         returns = [trade.net_return for trade in trades]
         return BacktestReport(
             trades=trades,
+            skipped_signals=skipped_signals,
             total_trades=len(trades),
             win_rate=self._win_rate(returns),
             mean_return=self._mean(returns),
@@ -241,6 +264,9 @@ class BacktestEngine:
                 stamp_tax_rate=self.config.stamp_tax_rate,
                 slippage_rate=self.config.slippage_rate,
                 max_holding_bars=parameter_set.max_holding_bars,
+                max_total_position_pct=self.config.max_total_position_pct,
+                max_theme_position_pct=self.config.max_theme_position_pct,
+                max_symbol_position_pct=self.config.max_symbol_position_pct,
             )
         )
         report = engine.run(signals=signals, bars=bars, start=start, end=end)
@@ -271,6 +297,59 @@ class BacktestEngine:
             if (start is None or signal.signal_time >= start)
             and (end is None or signal.signal_time <= end)
         ]
+
+    def _apply_capacity_limits(
+        self,
+        candidates: list[tuple[SignalCandidate, BacktestTrade]],
+    ) -> tuple[list[BacktestTrade], list[SkippedSignal]]:
+        accepted: list[BacktestTrade] = []
+        skipped: list[SkippedSignal] = []
+        for signal, trade in sorted(candidates, key=lambda item: item[1].entry_time):
+            active_trades = [
+                accepted_trade
+                for accepted_trade in accepted
+                if accepted_trade.exit_time > trade.entry_time
+            ]
+            reason = self._capacity_reject_reason(signal, active_trades)
+            if reason is not None:
+                skipped.append(
+                    SkippedSignal(
+                        ts_code=signal.ts_code,
+                        theme=signal.theme,
+                        signal_state=signal.state,
+                        signal_time=signal.signal_time,
+                        reason=reason,
+                    )
+                )
+                continue
+            accepted.append(trade)
+        return accepted, skipped
+
+    def _capacity_reject_reason(
+        self,
+        signal: SignalCandidate,
+        active_trades: list[BacktestTrade],
+    ) -> str | None:
+        next_position = self.config.position_pct
+        if self.config.max_symbol_position_pct is not None:
+            symbol_exposure = next_position + sum(
+                self.config.position_pct for trade in active_trades if trade.ts_code == signal.ts_code
+            )
+            if symbol_exposure > self.config.max_symbol_position_pct:
+                return "symbol_capacity_exceeded"
+
+        if self.config.max_theme_position_pct is not None and signal.theme is not None:
+            theme_exposure = next_position + sum(
+                self.config.position_pct for trade in active_trades if trade.theme == signal.theme
+            )
+            if theme_exposure > self.config.max_theme_position_pct:
+                return "theme_capacity_exceeded"
+
+        if self.config.max_total_position_pct is not None:
+            total_exposure = next_position + (self.config.position_pct * Decimal(len(active_trades)))
+            if total_exposure > self.config.max_total_position_pct:
+                return "total_capacity_exceeded"
+        return None
 
     def _group_by(
         self,

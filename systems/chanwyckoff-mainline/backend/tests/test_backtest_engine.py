@@ -269,3 +269,91 @@ def test_grid_search_filters_date_range_and_flags_small_concentrated_samples() -
     assert grid_report.results[0].symbol_concentration["600001.SH"] == Decimal("1")
     assert grid_report.best.name == "fast"
     assert grid_report.reliability_note == "theme_history_reliability_requires_point_in_time_constituents"
+
+
+def test_overlapping_positions_respect_total_theme_and_symbol_capacity_limits() -> None:
+    signal_time = datetime(2026, 5, 25, 10, 0, tzinfo=timezone.utc)
+    signals = [
+        SignalCandidate(
+            ts_code="600001.SH",
+            state="confirmed_3buy",
+            signal_time=signal_time,
+            wyckoff_score=86,
+            structure_upper=Decimal("10.60"),
+            structure_lower=Decimal("9.80"),
+            target_price=Decimal("11.40"),
+            theme="机器人",
+        ),
+        SignalCandidate(
+            ts_code="600002.SH",
+            state="confirmed_3buy",
+            signal_time=signal_time + timedelta(minutes=1),
+            wyckoff_score=84,
+            structure_upper=Decimal("20.60"),
+            structure_lower=Decimal("19.80"),
+            target_price=Decimal("21.40"),
+            theme="机器人",
+        ),
+    ]
+    bars = [
+        BacktestBar(
+            ts_code="600001.SH",
+            bar_time=signal_time + timedelta(minutes=30),
+            open=Decimal("10.90"),
+            high=Decimal("11.05"),
+            low=Decimal("10.84"),
+            close=Decimal("11.00"),
+            volume=1_000_000,
+            amount=Decimal("110000000"),
+        ),
+        BacktestBar(
+            ts_code="600001.SH",
+            bar_time=signal_time + timedelta(minutes=60),
+            open=Decimal("11.00"),
+            high=Decimal("11.50"),
+            low=Decimal("10.92"),
+            close=Decimal("11.42"),
+            volume=1_100_000,
+            amount=Decimal("125620000"),
+        ),
+        BacktestBar(
+            ts_code="600002.SH",
+            bar_time=signal_time + timedelta(minutes=30),
+            open=Decimal("20.90"),
+            high=Decimal("21.05"),
+            low=Decimal("20.84"),
+            close=Decimal("21.00"),
+            volume=1_000_000,
+            amount=Decimal("210000000"),
+        ),
+        BacktestBar(
+            ts_code="600002.SH",
+            bar_time=signal_time + timedelta(minutes=60),
+            open=Decimal("21.00"),
+            high=Decimal("21.50"),
+            low=Decimal("20.92"),
+            close=Decimal("21.42"),
+            volume=1_100_000,
+            amount=Decimal("235620000"),
+        ),
+    ]
+    engine = BacktestEngine(
+        BacktestConfig(
+            initial_cash=Decimal("100000"),
+            position_pct=Decimal("0.40"),
+            commission_rate=Decimal("0.0003"),
+            stamp_tax_rate=Decimal("0.001"),
+            slippage_rate=Decimal("0.001"),
+            max_holding_bars=8,
+            max_total_position_pct=Decimal("0.70"),
+            max_theme_position_pct=Decimal("0.50"),
+            max_symbol_position_pct=Decimal("0.40"),
+        )
+    )
+
+    report = engine.run(signals=signals, bars=bars)
+
+    assert [trade.ts_code for trade in report.trades] == ["600001.SH"]
+    assert len(report.skipped_signals) == 1
+    assert report.skipped_signals[0].ts_code == "600002.SH"
+    assert report.skipped_signals[0].reason == "theme_capacity_exceeded"
