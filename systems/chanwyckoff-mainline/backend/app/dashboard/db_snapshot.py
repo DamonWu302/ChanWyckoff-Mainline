@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
 
@@ -9,7 +10,16 @@ from app.models.market_data import DailyBar, IndexBar, Instrument, IntradayBar, 
 from app.selection.market_regime import MarketBreadthEvidence, MarketIndexEvidence, MarketRegimeService
 from app.selection.theme_strength import CoreStockEvidence, ThemeStrengthEvidence, ThemeStrengthResult, ThemeStrengthService
 from app.signals.third_buy import BreakoutBar, PullbackBar, ThirdBuySignal, ThirdBuySignalService, ThirdBuyStructure
+from app.signals.detail import SignalDetail
 from app.structure.recognition import Bar30m, RecognizedStructure, StructureRecognitionService
+
+
+@dataclass(frozen=True, slots=True)
+class SignalScanMatch:
+    signal: ThirdBuySignal
+    structure: RecognizedStructure
+    breakout: IntradayBar
+    pullbacks: list[IntradayBar]
 
 
 class DbOperationsSnapshotSource:
@@ -42,6 +52,33 @@ class DbOperationsSnapshotSource:
             theme_strength=theme_strength,
             signals=self._signal_inputs(trade_date, theme_strength),
         )
+
+    def signal_detail(self, ts_code: str, trade_date: date) -> SignalDetail | None:
+        themes = self._theme_evidence(trade_date)
+        if not themes:
+            return None
+        theme_strength = ThemeStrengthService().evaluate(
+            trade_date=trade_date,
+            themes=themes,
+            core_stocks={
+                theme.theme_code: self._core_stock_evidence(theme.theme_code, trade_date)
+                for theme in themes
+            },
+        )
+        for theme in theme_strength.themes:
+            for stock in theme.core_stocks:
+                if stock.ts_code != ts_code:
+                    continue
+                match = self._signal_match_for_stock(ts_code, trade_date)
+                if match is None:
+                    return None
+                return self._detail_from_match(
+                    match=match,
+                    ts_code=ts_code,
+                    name=stock.name,
+                    theme_name=theme.theme_name,
+                )
+        return None
 
     def _index_evidence(self, index_code: str, trade_date: date) -> MarketIndexEvidence | None:
         bars = list(
@@ -175,7 +212,7 @@ class DbOperationsSnapshotSource:
         signals: list[DashboardSignalInput] = []
         for theme in getattr(theme_strength, "themes", []):
             for stock in theme.core_stocks[:5]:
-                signal = self._signal_for_stock(
+                signal = self._signal_input_for_stock(
                     trade_date=trade_date,
                     ts_code=stock.ts_code,
                     name=stock.name,
@@ -187,7 +224,7 @@ class DbOperationsSnapshotSource:
         signals.sort(key=lambda item: (item.score, item.amount, item.signal_time), reverse=True)
         return signals
 
-    def _signal_for_stock(
+    def _signal_input_for_stock(
         self,
         trade_date: date,
         ts_code: str,
@@ -195,6 +232,28 @@ class DbOperationsSnapshotSource:
         theme_name: str,
         amount: Decimal,
     ) -> DashboardSignalInput | None:
+        match = self._signal_match_for_stock(ts_code, trade_date)
+        if match is None:
+            return None
+        return DashboardSignalInput(
+            ts_code=ts_code,
+            name=name,
+            theme=theme_name,
+            state=match.signal.state,
+            score=match.signal.wyckoff.score,
+            suggested_action=match.signal.action,
+            amount=amount,
+            signal_time=match.signal.signal_time,
+            structure_evidence=self._structure_evidence(match.structure),
+            volume_price_evidence=self._volume_price_evidence(match.signal.state, match.signal.volume_ratio),
+            wyckoff_forecast=match.signal.wyckoff.forecast,
+        )
+
+    def _signal_match_for_stock(
+        self,
+        ts_code: str,
+        trade_date: date,
+    ) -> SignalScanMatch | None:
         bars = self._intraday_bars(ts_code, trade_date)
         if len(bars) < 11:
             return None
@@ -205,27 +264,14 @@ class DbOperationsSnapshotSource:
         signal_items = [item for item in evaluated if item is not None]
         if not signal_items:
             return None
-        signal, structure = signal_items[-1]
-        return DashboardSignalInput(
-            ts_code=ts_code,
-            name=name,
-            theme=theme_name,
-            state=signal.state,
-            score=signal.wyckoff.score,
-            suggested_action=signal.action,
-            amount=amount,
-            signal_time=signal.signal_time,
-            structure_evidence=self._structure_evidence(structure),
-            volume_price_evidence=self._volume_price_evidence(signal.state, signal.volume_ratio),
-            wyckoff_forecast=signal.wyckoff.forecast,
-        )
+        return signal_items[-1]
 
     def _evaluate_signal_window(
         self,
         ts_code: str,
         bars: list[IntradayBar],
         breakout_index: int,
-    ) -> tuple[ThirdBuySignal, RecognizedStructure] | None:
+    ) -> SignalScanMatch | None:
         structure_bars = bars[:breakout_index]
         breakout_bar = bars[breakout_index]
         structure_result = StructureRecognitionService().analyze(
@@ -259,7 +305,12 @@ class DbOperationsSnapshotSource:
             signal = service.evaluate_breakout(third_buy_structure, breakout)
         if signal is None:
             return None
-        return signal, structure
+        return SignalScanMatch(
+            signal=signal,
+            structure=structure,
+            breakout=breakout_bar,
+            pullbacks=bars[breakout_index + 1 : breakout_index + 9],
+        )
 
     def _intraday_bars(self, ts_code: str, trade_date: date) -> list[IntradayBar]:
         start_at = datetime.combine(trade_date, time.min)
@@ -313,6 +364,76 @@ class DbOperationsSnapshotSource:
         if volume_ratio >= Decimal("1.80"):
             return "breakout_volume_confirmed"
         return "breakout_volume_adequate"
+
+    def _detail_from_match(
+        self,
+        match: SignalScanMatch,
+        ts_code: str,
+        name: str,
+        theme_name: str,
+    ) -> SignalDetail:
+        pullback_volume = "none"
+        support_quality = "pending"
+        if match.signal.state == "confirmed_3buy":
+            pullback_volume = "shrinking"
+            support_quality = "accepted_above_upper"
+        elif match.signal.state == "failed_3buy":
+            pullback_volume = "supply_returned"
+            support_quality = "failed"
+        return SignalDetail(
+            ts_code=ts_code,
+            name=name,
+            theme=theme_name,
+            state=match.signal.state,
+            suggested_action=match.signal.action,
+            score=match.signal.wyckoff.score,
+            structure={
+                "label": match.structure.label,
+                "upper": self._money(match.structure.upper),
+                "lower": self._money(match.structure.lower),
+                "mid": self._money(match.structure.mid),
+                "duration_bars": match.structure.duration_bars,
+                "quality_score": match.structure.quality_score,
+                "upper_tests": match.structure.upper_tests,
+            },
+            price_volume={
+                "breakout_close": self._money(match.breakout.close),
+                "breakout_strength": self._percent(match.signal.breakout_strength),
+                "breakout_volume_ratio": f"{match.signal.volume_ratio:.2f}",
+                "pullback_volume": pullback_volume,
+                "support_quality": support_quality,
+            },
+            wyckoff={
+                "background": match.signal.wyckoff.background,
+                "features": list(match.signal.wyckoff.features.values()),
+                "forecast": match.signal.wyckoff.forecast,
+                "score": match.signal.wyckoff.score,
+            },
+            risk={
+                "position_pct": self._position_pct(match.signal.state),
+                "stop_loss": self._money(match.structure.lower),
+                "target_price": self._money(match.structure.upper + match.structure.amplitude),
+                "time_stop_bars": 8,
+                "invalidations": [
+                    "close_back_inside_structure",
+                    "heavy_volume_supply_return",
+                    "pullback_timeout",
+                ],
+            },
+        )
+
+    def _money(self, value: Decimal) -> str:
+        return f"{value:.4f}"
+
+    def _percent(self, value: Decimal) -> str:
+        return f"{value * Decimal('100'):.2f}%"
+
+    def _position_pct(self, state: str) -> int:
+        if state == "confirmed_3buy":
+            return 25
+        if state == "proto_3buy":
+            return 10
+        return 0
 
     def _relative_strength(self, history: list[ThemeSnapshot], lookback: int) -> Decimal:
         if not history:
