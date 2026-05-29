@@ -1,6 +1,6 @@
 from datetime import date
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -27,6 +27,19 @@ def get_mainlines(
 ) -> list[dict[str, object]]:
     snapshot = _operations_snapshot(trade_date, db)
     return snapshot["mainlines"]
+
+
+@router.get("/themes/{theme_code}/core-stocks")
+def get_core_stocks(
+    theme_code: str,
+    trade_date: date | None = None,
+    db: Session = Depends(get_db),
+) -> list[dict[str, object]]:
+    snapshot = _operations_snapshot(trade_date, db)
+    for theme in snapshot["mainlines"]:
+        if theme.get("theme_code") == theme_code:
+            return theme["core_stocks"]
+    raise HTTPException(status_code=404, detail="Theme mainline not found")
 
 
 def _operations_snapshot(trade_date: date | None, db: Session) -> dict[str, object]:

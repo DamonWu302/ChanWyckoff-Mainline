@@ -55,6 +55,7 @@ class OperationsDashboardBuilder:
 
     def _theme_to_dict(self, theme: RankedTheme) -> dict[str, object]:
         return {
+            "theme_code": theme.theme_code,
             "theme": theme.theme_name,
             "label": theme.label,
             "strength_score": theme.score,

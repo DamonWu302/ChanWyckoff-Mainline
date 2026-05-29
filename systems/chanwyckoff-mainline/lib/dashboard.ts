@@ -26,6 +26,7 @@ export type DashboardSnapshot = {
     evidence: string[];
   };
   mainlines: Array<{
+    theme_code: string;
     theme: string;
     label: string;
     strength_score: number;
@@ -60,6 +61,7 @@ export const fallbackDashboard: DashboardSnapshot = {
   },
   mainlines: [
     {
+      theme_code: "BK1234",
       theme: "机器人",
       label: "confirmed_mainline",
       strength_score: 88,
@@ -70,6 +72,7 @@ export const fallbackDashboard: DashboardSnapshot = {
       ],
     },
     {
+      theme_code: "BK5678",
       theme: "CPO",
       label: "emerging_leader",
       strength_score: 79,
