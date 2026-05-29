@@ -151,13 +151,16 @@ def test_dashboard_endpoint_builds_mainline_snapshot_from_ingested_market_data(
     response = client.get("/api/dashboard?trade_date=2026-05-29")
     market_response = client.get("/api/market-regime?trade_date=2026-05-29")
     themes_response = client.get("/api/themes/mainlines?trade_date=2026-05-29")
+    signals_response = client.get("/api/signals?trade_date=2026-05-29")
 
     assert response.status_code == 200
     assert market_response.status_code == 200
     assert themes_response.status_code == 200
+    assert signals_response.status_code == 200
     body = response.json()
     market = market_response.json()
     themes = themes_response.json()
+    signals = signals_response.json()
     assert body["trade_date"] == "2026-05-29"
     assert body["market_regime"]["state"] == "risk_on"
     assert market["state"] == "risk_on"
@@ -176,6 +179,9 @@ def test_dashboard_endpoint_builds_mainline_snapshot_from_ingested_market_data(
     assert failed_signal["state"] == "failed_3buy"
     assert failed_signal["suggested_action"] == "filter"
     assert failed_signal["evidence"]["volume_price"] == "breakout_failed"
+    assert signals[0]["ts_code"] == "600001.SH"
+    assert signals[0]["state"] == "confirmed_3buy"
+    assert {signal["ts_code"] for signal in signals} == {"600001.SH", "600002.SH"}
     assert "机器人核心 Alpha" not in {
         stock["name"]
         for mainline in body["mainlines"]
