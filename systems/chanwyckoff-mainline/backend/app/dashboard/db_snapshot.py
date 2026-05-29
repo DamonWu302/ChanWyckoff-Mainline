@@ -8,7 +8,7 @@ from app.dashboard.snapshot import DashboardSignalInput, OperationsDashboardBuil
 from app.models.market_data import DailyBar, IndexBar, Instrument, IntradayBar, Theme, ThemeConstituent, ThemeSnapshot
 from app.selection.market_regime import MarketBreadthEvidence, MarketIndexEvidence, MarketRegimeService
 from app.selection.theme_strength import CoreStockEvidence, ThemeStrengthEvidence, ThemeStrengthResult, ThemeStrengthService
-from app.signals.third_buy import BreakoutBar, ThirdBuySignalService, ThirdBuyStructure
+from app.signals.third_buy import BreakoutBar, PullbackBar, ThirdBuySignal, ThirdBuySignalService, ThirdBuyStructure
 from app.structure.recognition import Bar30m, RecognizedStructure, StructureRecognitionService
 
 
@@ -198,36 +198,14 @@ class DbOperationsSnapshotSource:
         bars = self._intraday_bars(ts_code, trade_date)
         if len(bars) < 11:
             return None
-        structure_bars = bars[:-1]
-        breakout_bar = bars[-1]
-        structure_result = StructureRecognitionService().analyze(
-            [self._bar30m_from_intraday(bar) for bar in structure_bars]
-        )
-        if not structure_result.structures:
+        evaluated = [
+            self._evaluate_signal_window(ts_code, bars, breakout_index)
+            for breakout_index in range(10, len(bars))
+        ]
+        signal_items = [item for item in evaluated if item is not None]
+        if not signal_items:
             return None
-        structure = structure_result.structures[0]
-        avg_volume = int(sum(bar.volume for bar in structure_bars[-structure.duration_bars :]) / structure.duration_bars)
-        signal = ThirdBuySignalService().evaluate_breakout(
-            ThirdBuyStructure(
-                ts_code=ts_code,
-                upper=structure.upper,
-                lower=structure.lower,
-                mid=structure.mid,
-                quality_score=structure.quality_score,
-                platform_avg_volume=avg_volume,
-            ),
-            BreakoutBar(
-                bar_time=breakout_bar.bar_time,
-                open=breakout_bar.open,
-                high=breakout_bar.high,
-                low=breakout_bar.low,
-                close=breakout_bar.close,
-                volume=breakout_bar.volume,
-                amount=breakout_bar.amount,
-            ),
-        )
-        if signal is None:
-            return None
+        signal, structure = signal_items[-1]
         return DashboardSignalInput(
             ts_code=ts_code,
             name=name,
@@ -238,9 +216,50 @@ class DbOperationsSnapshotSource:
             amount=amount,
             signal_time=signal.signal_time,
             structure_evidence=self._structure_evidence(structure),
-            volume_price_evidence=self._volume_price_evidence(signal.volume_ratio),
+            volume_price_evidence=self._volume_price_evidence(signal.state, signal.volume_ratio),
             wyckoff_forecast=signal.wyckoff.forecast,
         )
+
+    def _evaluate_signal_window(
+        self,
+        ts_code: str,
+        bars: list[IntradayBar],
+        breakout_index: int,
+    ) -> tuple[ThirdBuySignal, RecognizedStructure] | None:
+        structure_bars = bars[:breakout_index]
+        breakout_bar = bars[breakout_index]
+        structure_result = StructureRecognitionService().analyze(
+            [self._bar30m_from_intraday(bar) for bar in structure_bars]
+        )
+        if not structure_result.structures:
+            return None
+        structure = structure_result.structures[0]
+        avg_volume = int(sum(bar.volume for bar in structure_bars[-structure.duration_bars :]) / structure.duration_bars)
+        third_buy_structure = ThirdBuyStructure(
+            ts_code=ts_code,
+            upper=structure.upper,
+            lower=structure.lower,
+            mid=structure.mid,
+            quality_score=structure.quality_score,
+            platform_avg_volume=avg_volume,
+        )
+        breakout = BreakoutBar(
+            bar_time=breakout_bar.bar_time,
+            open=breakout_bar.open,
+            high=breakout_bar.high,
+            low=breakout_bar.low,
+            close=breakout_bar.close,
+            volume=breakout_bar.volume,
+            amount=breakout_bar.amount,
+        )
+        service = ThirdBuySignalService()
+        pullbacks = [self._pullback_bar(bar, structure) for bar in bars[breakout_index + 1 : breakout_index + 9]]
+        signal = service.evaluate_pullback(third_buy_structure, breakout, pullbacks)
+        if signal is None:
+            signal = service.evaluate_breakout(third_buy_structure, breakout)
+        if signal is None:
+            return None
+        return signal, structure
 
     def _intraday_bars(self, ts_code: str, trade_date: date) -> list[IntradayBar]:
         start_at = datetime.combine(trade_date, time.min)
@@ -271,10 +290,26 @@ class DbOperationsSnapshotSource:
             amount=bar.amount,
         )
 
+    def _pullback_bar(self, bar: IntradayBar, structure: RecognizedStructure) -> PullbackBar:
+        return PullbackBar(
+            bar_time=bar.bar_time,
+            open=bar.open,
+            high=bar.high,
+            low=bar.low,
+            close=bar.close,
+            volume=bar.volume,
+            amount=bar.amount,
+            atr=max(bar.high - bar.low, structure.amplitude / Decimal("3")),
+        )
+
     def _structure_evidence(self, structure: RecognizedStructure) -> str:
         return f"{structure.label}_upper_breakout"
 
-    def _volume_price_evidence(self, volume_ratio: Decimal) -> str:
+    def _volume_price_evidence(self, state: str, volume_ratio: Decimal) -> str:
+        if state == "confirmed_3buy":
+            return "pullback_shrinking_accepted"
+        if state == "failed_3buy":
+            return "breakout_failed"
         if volume_ratio >= Decimal("1.80"):
             return "breakout_volume_confirmed"
         return "breakout_volume_adequate"

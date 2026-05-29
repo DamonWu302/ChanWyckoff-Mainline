@@ -144,7 +144,8 @@ def test_dashboard_endpoint_builds_mainline_snapshot_from_ingested_market_data(
         ]
     )
     _seed_theme_history(service, trade_date)
-    _seed_proto_3buy_intraday_bars(service, trade_date)
+    _seed_confirmed_3buy_intraday_bars(service, trade_date)
+    _seed_failed_3buy_intraday_bars(service, trade_date)
     db_session.commit()
 
     response = client.get("/api/dashboard?trade_date=2026-05-29")
@@ -167,10 +168,14 @@ def test_dashboard_endpoint_builds_mainline_snapshot_from_ingested_market_data(
     assert body["signals"][0]["ts_code"] == "600001.SH"
     assert body["signals"][0]["name"] == "机器人实盘核心"
     assert body["signals"][0]["theme"] == "机器人实盘"
-    assert body["signals"][0]["state"] == "proto_3buy"
-    assert body["signals"][0]["suggested_action"] == "light_position"
+    assert body["signals"][0]["state"] == "confirmed_3buy"
+    assert body["signals"][0]["suggested_action"] == "upgrade_position"
     assert body["signals"][0]["evidence"]["structure"] == "statistical_platform_upper_breakout"
-    assert body["signals"][0]["evidence"]["volume_price"] == "breakout_volume_confirmed"
+    assert body["signals"][0]["evidence"]["volume_price"] == "pullback_shrinking_accepted"
+    failed_signal = next(signal for signal in body["signals"] if signal["ts_code"] == "600002.SH")
+    assert failed_signal["state"] == "failed_3buy"
+    assert failed_signal["suggested_action"] == "filter"
+    assert failed_signal["evidence"]["volume_price"] == "breakout_failed"
     assert "机器人核心 Alpha" not in {
         stock["name"]
         for mainline in body["mainlines"]
@@ -223,7 +228,7 @@ def _seed_theme_history(service: MarketDataIngestionService, trade_date: date) -
         )
 
 
-def _seed_proto_3buy_intraday_bars(
+def _seed_confirmed_3buy_intraday_bars(
     service: MarketDataIngestionService,
     trade_date: date,
 ) -> None:
@@ -271,5 +276,91 @@ def _seed_proto_3buy_intraday_bars(
             amount=Decimal("2409000.00"),
             source="tickflow",
         )
+    )
+    for offset, (low, close, volume) in enumerate(
+        [("10.55", "10.70", 82000), ("10.48", "10.68", 76000)],
+        start=1,
+    ):
+        payloads.append(
+            IntradayBarPayload(
+                ts_code="600001.SH",
+                bar_time=start_time + timedelta(minutes=30 * (len(platform) + offset)),
+                frequency="30m",
+                adjustment="qfq",
+                open=Decimal("10.72"),
+                high=Decimal("10.88"),
+                low=Decimal(low),
+                close=Decimal(close),
+                volume=volume,
+                amount=Decimal(volume) * Decimal(close),
+                source="tickflow",
+            )
+        )
+    service.upsert_intraday_bars(payloads)
+
+
+def _seed_failed_3buy_intraday_bars(
+    service: MarketDataIngestionService,
+    trade_date: date,
+) -> None:
+    start_time = datetime.combine(trade_date, datetime.min.time(), tzinfo=timezone.utc).replace(hour=9, minute=30)
+    platform = [
+        ("10.30", "9.80", "10.00", 100000),
+        ("10.50", "9.90", "10.20", 110000),
+        ("10.40", "9.85", "10.05", 105000),
+        ("10.55", "9.95", "10.30", 115000),
+        ("10.45", "9.90", "10.10", 108000),
+        ("10.60", "10.00", "10.35", 112000),
+        ("10.50", "9.92", "10.15", 106000),
+        ("10.58", "10.02", "10.40", 118000),
+        ("10.52", "9.98", "10.25", 109000),
+        ("10.62", "10.05", "10.45", 116000),
+    ]
+    payloads: list[IntradayBarPayload] = []
+    for index, (high, low, close, volume) in enumerate(platform):
+        payloads.append(
+            IntradayBarPayload(
+                ts_code="600002.SH",
+                bar_time=start_time + timedelta(minutes=30 * index),
+                frequency="30m",
+                adjustment="qfq",
+                open=Decimal(close),
+                high=Decimal(high),
+                low=Decimal(low),
+                close=Decimal(close),
+                volume=volume,
+                amount=Decimal(volume) * Decimal(close),
+                source="tickflow",
+            )
+        )
+    payloads.extend(
+        [
+            IntradayBarPayload(
+                ts_code="600002.SH",
+                bar_time=start_time + timedelta(minutes=30 * len(platform)),
+                frequency="30m",
+                adjustment="qfq",
+                open=Decimal("10.55"),
+                high=Decimal("11.20"),
+                low=Decimal("10.50"),
+                close=Decimal("10.95"),
+                volume=220000,
+                amount=Decimal("2409000.00"),
+                source="tickflow",
+            ),
+            IntradayBarPayload(
+                ts_code="600002.SH",
+                bar_time=start_time + timedelta(minutes=30 * (len(platform) + 1)),
+                frequency="30m",
+                adjustment="qfq",
+                open=Decimal("10.70"),
+                high=Decimal("10.76"),
+                low=Decimal("10.05"),
+                close=Decimal("10.18"),
+                volume=160000,
+                amount=Decimal("1628800.00"),
+                source="tickflow",
+            ),
+        ]
     )
     service.upsert_intraday_bars(payloads)
