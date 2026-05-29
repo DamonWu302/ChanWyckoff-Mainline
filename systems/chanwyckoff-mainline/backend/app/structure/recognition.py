@@ -92,6 +92,14 @@ class StructureRecognitionService:
         if amplitude_ratio > self.max_amplitude_ratio and not is_converging:
             return StructureRecognitionResult(fractals=fractals, strokes=strokes)
 
+        chan_center = None if is_converging else self._chan_center(strokes, bars, amplitude)
+        if chan_center is not None:
+            return StructureRecognitionResult(
+                structures=[chan_center],
+                fractals=fractals,
+                strokes=strokes,
+            )
+
         upper_tests = self._upper_tests(window, upper, amplitude)
         quality_score = self._quality_score(
             amplitude_ratio, overlap_rate, upper_tests, len(window), is_converging
@@ -126,6 +134,62 @@ class StructureRecognitionService:
                 lower_high_count += 1
         threshold = max(5, int((len(bars) - 1) * 0.75))
         return lower_close_count >= threshold and lower_high_count >= threshold
+
+    def _chan_center(
+        self,
+        strokes: list[Stroke],
+        bars: list[Bar30m],
+        window_amplitude: Decimal,
+    ) -> RecognizedStructure | None:
+        if len(strokes) < 3:
+            return None
+        for stroke_group in reversed([strokes[index : index + 3] for index in range(len(strokes) - 2)]):
+            upper = min(self._stroke_high(stroke) for stroke in stroke_group)
+            lower = max(self._stroke_low(stroke) for stroke in stroke_group)
+            if upper <= lower:
+                continue
+            mid = (upper + lower) / Decimal("2")
+            amplitude = upper - lower
+            if mid <= 0 or amplitude / mid > self.max_amplitude_ratio:
+                continue
+            if amplitude > window_amplitude * Decimal("0.60"):
+                continue
+
+            start_time = stroke_group[0].start.bar_time
+            end_time = stroke_group[-1].end.bar_time
+            window = [bar for bar in bars if start_time <= bar.bar_time <= end_time]
+            if len(window) < 4:
+                continue
+
+            overlap_rate = self._overlap_rate(window)
+            upper_tests = self._upper_tests(window, upper, amplitude)
+            quality_score = self._quality_score(
+                amplitude / mid,
+                max(overlap_rate, self.min_overlap_rate),
+                max(upper_tests, 2),
+                len(window),
+                False,
+            )
+            return RecognizedStructure(
+                label="chan_center",
+                start_time=start_time,
+                end_time=end_time,
+                upper=upper,
+                lower=lower,
+                mid=mid,
+                duration_bars=len(window),
+                amplitude=amplitude,
+                overlap_rate=overlap_rate,
+                upper_tests=upper_tests,
+                quality_score=max(70, quality_score + 8),
+            )
+        return None
+
+    def _stroke_high(self, stroke: Stroke) -> Decimal:
+        return max(stroke.start.price, stroke.end.price)
+
+    def _stroke_low(self, stroke: Stroke) -> Decimal:
+        return min(stroke.start.price, stroke.end.price)
 
     def _overlap_rate(self, bars: list[Bar30m]) -> Decimal:
         pair_count = 0

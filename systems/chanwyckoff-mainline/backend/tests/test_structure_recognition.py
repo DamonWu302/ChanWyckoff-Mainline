@@ -88,6 +88,32 @@ def test_recognizes_converging_platform_and_outputs_fractals_and_strokes() -> No
     assert len(result.strokes) >= 1
 
 
+def test_recognizes_chan_center_from_three_overlapping_strokes() -> None:
+    bars = [
+        make_bar(0, "10.0", "9.6", "9.8"),
+        make_bar(1, "10.8", "9.9", "10.7"),
+        make_bar(2, "10.4", "9.9", "10.0"),
+        make_bar(3, "10.7", "10.1", "10.6"),
+        make_bar(4, "10.3", "10.0", "10.1"),
+        make_bar(5, "10.6", "10.2", "10.5"),
+        make_bar(6, "10.2", "9.9", "10.0"),
+        make_bar(7, "10.5", "10.1", "10.4"),
+        make_bar(8, "10.3", "10.0", "10.1"),
+        make_bar(9, "10.4", "10.1", "10.3"),
+    ]
+    service = StructureRecognitionService()
+
+    result = service.analyze(bars)
+
+    assert len(result.structures) == 1
+    structure = result.structures[0]
+    assert structure.label == "chan_center"
+    assert structure.upper == Decimal("10.5")
+    assert structure.lower == Decimal("10.0")
+    assert structure.duration_bars >= 4
+    assert structure.quality_score >= 70
+
+
 def test_rejects_fake_platform_with_low_overlap_and_wide_amplitude() -> None:
     bars = [
         make_bar(0, "10.2", "9.8", "10.0"),
