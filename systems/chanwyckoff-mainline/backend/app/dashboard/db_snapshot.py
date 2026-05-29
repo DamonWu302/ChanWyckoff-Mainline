@@ -5,6 +5,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.backtest.engine import BacktestBar, SignalCandidate
 from app.dashboard.snapshot import DashboardSignalInput, OperationsDashboardBuilder
 from app.models.market_data import DailyBar, IndexBar, Instrument, IntradayBar, Theme, ThemeConstituent, ThemeSnapshot
 from app.selection.market_regime import MarketBreadthEvidence, MarketIndexEvidence, MarketRegimeService
@@ -20,6 +21,12 @@ class SignalScanMatch:
     structure: RecognizedStructure
     breakout: IntradayBar
     pullbacks: list[IntradayBar]
+
+
+@dataclass(frozen=True, slots=True)
+class DbBacktestInputs:
+    signals: list[SignalCandidate]
+    bars: list[BacktestBar]
 
 
 class DbOperationsSnapshotSource:
@@ -69,7 +76,7 @@ class DbOperationsSnapshotSource:
             for stock in theme.core_stocks:
                 if stock.ts_code != ts_code:
                     continue
-                match = self._signal_match_for_stock(ts_code, trade_date)
+                match = self._signal_match_for_stock(ts_code, trade_date, latest=True)
                 if match is None:
                     return None
                 return self._detail_from_match(
@@ -79,6 +86,42 @@ class DbOperationsSnapshotSource:
                     theme_name=theme.theme_name,
                 )
         return None
+
+    def backtest_inputs(self, start: datetime, end: datetime) -> DbBacktestInputs | None:
+        signals: list[SignalCandidate] = []
+        for trade_date in self._date_range(start.date(), end.date()):
+            themes = self._theme_evidence(trade_date)
+            if not themes:
+                continue
+            theme_strength = ThemeStrengthService().evaluate(
+                trade_date=trade_date,
+                themes=themes,
+                core_stocks={
+                    theme.theme_code: self._core_stock_evidence(theme.theme_code, trade_date)
+                    for theme in themes
+                },
+            )
+            for theme in theme_strength.themes:
+                for stock in theme.core_stocks:
+                    match = self._signal_match_for_stock(stock.ts_code, trade_date, latest=False)
+                    if match is None:
+                        continue
+                    signals.append(
+                        SignalCandidate(
+                            ts_code=stock.ts_code,
+                            state=match.signal.state,
+                            signal_time=match.signal.signal_time,
+                            wyckoff_score=match.signal.wyckoff.score,
+                            structure_upper=match.structure.upper,
+                            structure_lower=match.structure.lower,
+                            target_price=match.structure.upper + match.structure.amplitude,
+                            theme=theme.theme_name,
+                        )
+                    )
+        bars = self._backtest_bars(start, end)
+        if not signals or not bars:
+            return None
+        return DbBacktestInputs(signals=signals, bars=bars)
 
     def _index_evidence(self, index_code: str, trade_date: date) -> MarketIndexEvidence | None:
         bars = list(
@@ -232,7 +275,7 @@ class DbOperationsSnapshotSource:
         theme_name: str,
         amount: Decimal,
     ) -> DashboardSignalInput | None:
-        match = self._signal_match_for_stock(ts_code, trade_date)
+        match = self._signal_match_for_stock(ts_code, trade_date, latest=True)
         if match is None:
             return None
         return DashboardSignalInput(
@@ -253,6 +296,7 @@ class DbOperationsSnapshotSource:
         self,
         ts_code: str,
         trade_date: date,
+        latest: bool,
     ) -> SignalScanMatch | None:
         bars = self._intraday_bars(ts_code, trade_date)
         if len(bars) < 11:
@@ -264,7 +308,7 @@ class DbOperationsSnapshotSource:
         signal_items = [item for item in evaluated if item is not None]
         if not signal_items:
             return None
-        return signal_items[-1]
+        return signal_items[-1] if latest else signal_items[0]
 
     def _evaluate_signal_window(
         self,
@@ -300,7 +344,15 @@ class DbOperationsSnapshotSource:
         )
         service = ThirdBuySignalService()
         pullbacks = [self._pullback_bar(bar, structure) for bar in bars[breakout_index + 1 : breakout_index + 9]]
-        signal = service.evaluate_pullback(third_buy_structure, breakout, pullbacks)
+        signal = None
+        for pullback_count in range(1, len(pullbacks) + 1):
+            signal = service.evaluate_pullback(
+                third_buy_structure,
+                breakout,
+                pullbacks[:pullback_count],
+            )
+            if signal is not None:
+                break
         if signal is None:
             signal = service.evaluate_breakout(third_buy_structure, breakout)
         if signal is None:
@@ -329,6 +381,36 @@ class DbOperationsSnapshotSource:
                 .order_by(IntradayBar.bar_time)
             )
         )
+
+    def _backtest_bars(self, start: datetime, end: datetime) -> list[BacktestBar]:
+        rows = list(
+            self.session.scalars(
+                select(IntradayBar)
+                .join(Instrument)
+                .where(
+                    IntradayBar.frequency == "30m",
+                    IntradayBar.adjustment == "qfq",
+                    IntradayBar.bar_time >= start,
+                    IntradayBar.bar_time <= end,
+                    Instrument.is_active.is_(True),
+                    Instrument.market_board == "main_board",
+                )
+                .order_by(Instrument.ts_code, IntradayBar.bar_time)
+            )
+        )
+        return [
+            BacktestBar(
+                ts_code=bar.instrument.ts_code,
+                bar_time=bar.bar_time,
+                open=bar.open,
+                high=bar.high,
+                low=bar.low,
+                close=bar.close,
+                volume=bar.volume,
+                amount=bar.amount,
+            )
+            for bar in rows
+        ]
 
     def _bar30m_from_intraday(self, bar: IntradayBar) -> Bar30m:
         return Bar30m(
@@ -434,6 +516,14 @@ class DbOperationsSnapshotSource:
         if state == "proto_3buy":
             return 10
         return 0
+
+    def _date_range(self, start: date, end: date) -> list[date]:
+        days = (end - start).days
+        if days < 0:
+            return []
+        from datetime import timedelta
+
+        return [start + timedelta(days=offset) for offset in range(days + 1)]
 
     def _relative_strength(self, history: list[ThemeSnapshot], lookback: int) -> Decimal:
         if not history:

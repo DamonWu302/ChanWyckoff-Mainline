@@ -1,8 +1,10 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 
 from app.backtest.engine import (
     BacktestBar,
@@ -15,6 +17,7 @@ from app.backtest.engine import (
     SignalCandidate,
     SkippedSignal,
 )
+from app.db.session import get_db
 
 
 router = APIRouter(prefix="/backtests", tags=["backtests"])
@@ -32,10 +35,16 @@ class BacktestSummaryRequest(BaseModel):
 
 
 @router.post("/summary")
-def run_backtest_summary(payload: BacktestSummaryRequest) -> dict[str, object]:
+def run_backtest_summary(
+    payload: BacktestSummaryRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    source_inputs = _db_backtest_inputs(payload, db)
+    signals = source_inputs.signals if source_inputs is not None else _sample_signals(payload.start)
+    bars = source_inputs.bars if source_inputs is not None else _sample_bars(payload.start)
     grid_report = _sample_engine().run_grid_search(
-        signals=_sample_signals(payload.start),
-        bars=_sample_bars(payload.start),
+        signals=signals,
+        bars=bars,
         start=payload.start,
         end=payload.end,
         parameter_sets=[
@@ -46,6 +55,15 @@ def run_backtest_summary(payload: BacktestSummaryRequest) -> dict[str, object]:
         max_symbol_concentration=Decimal("0.60"),
     )
     return _grid_report_to_dict(payload, grid_report)
+
+
+def _db_backtest_inputs(payload: BacktestSummaryRequest, db: Session) -> object | None:
+    from app.dashboard.db_snapshot import DbOperationsSnapshotSource
+
+    try:
+        return DbOperationsSnapshotSource(db).backtest_inputs(payload.start, payload.end)
+    except SQLAlchemyError:
+        return None
 
 
 def _grid_report_to_dict(
