@@ -1,11 +1,16 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/layout/AppShell";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { Panel } from "@/components/ui/Panel";
 import { Status } from "@/components/ui/Status";
+import {
+  fallbackReviewFailureStats,
+  fetchReviewFailureStats,
+  type ReviewFailureStats,
+} from "@/lib/reviewStats";
 
 type ReviewEvent = {
   time: string;
@@ -32,11 +37,38 @@ const initialEvents: ReviewEvent[] = [
   },
 ];
 
+function sortedDistribution(items: Record<string, number>) {
+  return Object.entries(items).sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]));
+}
+
 export function ReviewPage() {
   const [events, setEvents] = useState(initialEvents);
+  const [failureStats, setFailureStats] = useState<ReviewFailureStats>(fallbackReviewFailureStats);
   const [manualState, setManualState] = useState("prepared");
   const [failureReason, setFailureReason] = useState("未失败");
   const [note, setNote] = useState("");
+  const manualDistribution = useMemo(
+    () => sortedDistribution(failureStats.manual_failure_reasons),
+    [failureStats.manual_failure_reasons],
+  );
+  const llmDistribution = useMemo(
+    () => sortedDistribution(failureStats.llm_failure_types),
+    [failureStats.llm_failure_types],
+  );
+
+  useEffect(() => {
+    let mounted = true;
+    fetchReviewFailureStats()
+      .then((stats) => {
+        if (mounted) setFailureStats(stats);
+      })
+      .catch(() => {
+        if (mounted) setFailureStats(fallbackReviewFailureStats);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -120,7 +152,41 @@ export function ReviewPage() {
           </form>
         </Panel>
       </section>
+
+      <section className="grid cols-2 section-gap">
+        <Panel
+          action={<Status variant={failureStats.total_failed_records > 0 ? "warn" : "good"}>{failureStats.total_failed_records}</Status>}
+          title="失败原因分布"
+        >
+          <div className="timeline compact">
+            {manualDistribution.map(([reason, count]) => (
+              <div className="event" key={reason}>
+                <span className="mono">{count}</span>
+                <div>
+                  <strong>{reason}</strong>
+                  <div className="subtle">人工复盘归因</div>
+                </div>
+                <Status variant="warn">manual</Status>
+              </div>
+            ))}
+          </div>
+        </Panel>
+
+        <Panel action={<Status variant="info">LLM</Status>} title="LLM 失败样本总结">
+          <div className="timeline compact">
+            {llmDistribution.map(([reason, count]) => (
+              <div className="event" key={reason}>
+                <span className="mono">{count}</span>
+                <div>
+                  <strong>{reason}</strong>
+                  <div className="subtle">只作为解释，不改变规则结果</div>
+                </div>
+                <Status variant="info">summary</Status>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      </section>
     </AppShell>
   );
 }
-
