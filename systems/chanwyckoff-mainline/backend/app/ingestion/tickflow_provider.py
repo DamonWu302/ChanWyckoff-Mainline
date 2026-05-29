@@ -5,7 +5,7 @@ from typing import Any
 
 import httpx
 
-from app.ingestion.providers import MarketBarsDataset, ProviderRecord
+from app.ingestion.providers import IndexBarsDataset, MarketBarsDataset, ProviderRecord
 
 
 JsonGet = Callable[[str, dict[str, str], dict[str, str]], Mapping[str, Any]]
@@ -56,6 +56,31 @@ class TickFlowHttpProvider:
             intraday_bars=[
                 self._intraday_bar_record(item, adjustment)
                 for item in self._bars_from_payload(intraday_payload)
+            ],
+        )
+
+    def fetch_index_bars(
+        self,
+        index_code: str,
+        start_date: date,
+        end_date: date,
+        adjustment: str,
+    ) -> IndexBarsDataset:
+        payload = self._get_json(
+            "/index/bars",
+            {
+                "index_code": index_code,
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "adjustment": adjustment,
+                "frequency": "1d",
+            },
+            self._headers(),
+        )
+        return IndexBarsDataset(
+            index_bars=[
+                self._index_bar_record(item, adjustment)
+                for item in self._bars_from_payload(payload)
             ],
         )
 
@@ -148,6 +173,21 @@ class TickFlowHttpProvider:
             "source": self.source,
         }
 
+    def _index_bar_record(self, item: Mapping[str, Any], adjustment: str) -> ProviderRecord:
+        return {
+            "index_code": str(item["index_code"]),
+            "index_name": str(item["index_name"]),
+            "trade_date": self._date(item["trade_date"]),
+            "adjustment": adjustment,
+            "open": self._decimal(item["open"]),
+            "high": self._decimal(item["high"]),
+            "low": self._decimal(item["low"]),
+            "close": self._decimal(item["close"]),
+            "volume": self._optional_int(item.get("volume")),
+            "amount": self._optional_decimal(item.get("amount")),
+            "source": self.source,
+        }
+
     def _date(self, value: object) -> date:
         if isinstance(value, date) and not isinstance(value, datetime):
             return value
@@ -174,6 +214,11 @@ class TickFlowHttpProvider:
         if value is None:
             return None
         return self._decimal(value)
+
+    def _optional_int(self, value: object) -> int | None:
+        if value is None:
+            return None
+        return int(value)
 
     def _optional_str(self, value: object) -> str | None:
         if value is None:

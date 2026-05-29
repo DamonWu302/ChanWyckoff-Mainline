@@ -119,6 +119,63 @@ def test_tickflow_provider_can_skip_30m_fetch() -> None:
     assert dataset.intraday_bars == []
 
 
+def test_tickflow_provider_fetches_index_bars() -> None:
+    requests: list[tuple[str, dict[str, str], dict[str, str]]] = []
+
+    def fake_get(
+        path: str,
+        params: dict[str, str],
+        headers: dict[str, str],
+    ) -> dict[str, object]:
+        requests.append((path, params, headers))
+        return {
+            "bars": [
+                {
+                    "index_code": "000001.SH",
+                    "index_name": "上证指数",
+                    "trade_date": "2026-05-25",
+                    "open": "3120.10",
+                    "high": "3160.20",
+                    "low": "3108.30",
+                    "close": "3150.40",
+                    "volume": 123456789,
+                    "amount": "456789012345.00",
+                }
+            ]
+        }
+
+    provider = TickFlowHttpProvider(
+        base_url="https://api.example.test",
+        api_key="secret-token",
+        get_json=fake_get,
+    )
+
+    dataset = provider.fetch_index_bars(
+        "000001.SH",
+        date(2026, 5, 25),
+        date(2026, 5, 26),
+        adjustment="none",
+    )
+
+    assert requests == [
+        (
+            "/index/bars",
+            {
+                "index_code": "000001.SH",
+                "start_date": "2026-05-25",
+                "end_date": "2026-05-26",
+                "adjustment": "none",
+                "frequency": "1d",
+            },
+            {"Authorization": "Bearer secret-token"},
+        )
+    ]
+    assert dataset.index_bars[0]["index_name"] == "上证指数"
+    assert dataset.index_bars[0]["trade_date"] == date(2026, 5, 25)
+    assert dataset.index_bars[0]["amount"] == Decimal("456789012345.00")
+    assert dataset.index_bars[0]["source"] == "tickflow"
+
+
 def test_tickflow_provider_factory_uses_settings_without_exposing_secret() -> None:
     settings = Settings(
         tickflow_base_url="https://api.example.test/",

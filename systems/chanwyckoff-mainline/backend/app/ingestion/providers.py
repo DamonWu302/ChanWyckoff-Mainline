@@ -24,6 +24,11 @@ class MarketBarsDataset:
 
 
 @dataclass(frozen=True, slots=True)
+class IndexBarsDataset:
+    index_bars: list[ProviderRecord]
+
+
+@dataclass(frozen=True, slots=True)
 class TdxSnapshotDataset:
     snapshots: list[ProviderRecord]
 
@@ -40,6 +45,15 @@ class TickFlowProvider(Protocol):
         include_30m: bool,
     ) -> MarketBarsDataset:
         """Fetch qfq daily and optional 30m bars for one instrument."""
+
+    def fetch_index_bars(
+        self,
+        index_code: str,
+        start_date: date,
+        end_date: date,
+        adjustment: str,
+    ) -> IndexBarsDataset:
+        """Fetch daily index bars used by market-regime evidence."""
 
 
 class AkshareThemeProvider(Protocol):
