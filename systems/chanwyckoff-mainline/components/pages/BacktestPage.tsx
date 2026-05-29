@@ -1,3 +1,6 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/layout/AppShell";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { MiniChart } from "@/components/ui/Charts";
@@ -5,8 +8,33 @@ import { CopyButton } from "@/components/ui/CopyButton";
 import { Metric } from "@/components/ui/Metric";
 import { Panel } from "@/components/ui/Panel";
 import { Status } from "@/components/ui/Status";
+import {
+  fallbackBacktestSummary,
+  fetchBacktestSummary,
+  type BacktestSummary,
+} from "@/lib/backtestSummary";
 
 export function BacktestPage() {
+  const [summary, setSummary] = useState<BacktestSummary>(fallbackBacktestSummary);
+  const best = summary.best ?? summary.results[0];
+  const bucketRows = useMemo(() => {
+    return Object.entries(best?.by_wyckoff_bucket ?? {}).sort(([left], [right]) => right.localeCompare(left));
+  }, [best]);
+
+  useEffect(() => {
+    let mounted = true;
+    fetchBacktestSummary()
+      .then((nextSummary) => {
+        if (mounted) setSummary(nextSummary);
+      })
+      .catch(() => {
+        if (mounted) setSummary(fallbackBacktestSummary);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   return (
     <AppShell note="主题增强回测只在历史主题数据可靠区间内给结论，结构回测从 2019 起独立验证。">
       <PageHeader
@@ -18,14 +46,19 @@ export function BacktestPage() {
 
       <section className="grid cols-4 section-gap">
         <Metric foot="先验证三买结构本体" label="Mode" value="structural" />
-        <Metric foot="跨市场阶段切片" label="Window" value="2019+" />
+        <Metric foot={summary.end.slice(0, 10)} label="Window" value={summary.start.slice(0, 10)} />
         <Metric foot="含成本、滑点、停复牌约束" label="Execution" value="next bar" />
-        <Metric foot="小范围稳健性，不做宽泛优化" label="Search" value="small grid" />
+        <Metric foot={best?.risk_flags.join(" / ") || "no flags"} label="Search" value={best?.name ?? "small grid"} />
       </section>
 
       <section className="grid cols-2">
-        <Panel action={<Status>待接入回测</Status>} title="权益与回撤">
+        <Panel action={<Status variant="info">API</Status>} title="权益与回撤">
           <MiniChart className="backtest-equity-chart" lineStyle="polygon(0 82%,10% 70%,20% 74%,31% 55%,42% 59%,53% 40%,64% 46%,75% 24%,87% 34%,100% 18%,100% 100%,0 100%)" />
+          <ul className="rule-list">
+            <li><span className="mono subtle">trades</span><span>{best?.total_trades ?? 0} 笔，胜率 {best?.win_rate ?? "0"}</span></li>
+            <li><span className="mono subtle">return</span><span>均值 {best?.mean_return ?? "0"} / 中位 {best?.median_return ?? "0"}</span></li>
+            <li><span className="mono subtle">drawdown</span><span>最大回撤 {best?.max_drawdown ?? "0"}</span></li>
+          </ul>
         </Panel>
 
         <Panel action={<Status variant="good">must prove</Status>} bodyClassName="table-panel-body" title="评分分层">
@@ -33,10 +66,14 @@ export function BacktestPage() {
             <table>
               <thead><tr><th>层级</th><th>规则含义</th><th>样本</th><th>结论状态</th></tr></thead>
               <tbody>
-                <tr><td className="mono">80+</td><td>高质量机会，优先进入作战台</td><td className="mono">待接入</td><td><Status variant="warn">待验证</Status></td></tr>
-                <tr><td className="mono">60-79</td><td>可观察，降低优先级</td><td className="mono">待接入</td><td><Status variant="warn">待验证</Status></td></tr>
-                <tr><td className="mono">40-59</td><td>观察池，通常不交易</td><td className="mono">待接入</td><td><Status>记录</Status></td></tr>
-                <tr><td className="mono">&lt;40</td><td>过滤出交易候选</td><td className="mono">待接入</td><td><Status variant="danger">过滤</Status></td></tr>
+                {bucketRows.map(([bucket, slice]) => (
+                  <tr key={bucket}>
+                    <td className="mono">{bucket}</td>
+                    <td>按 wyckoff_score 分段验证</td>
+                    <td className="mono">{slice.total_trades}</td>
+                    <td><Status variant={Number(slice.mean_return) > 0 ? "good" : "warn"}>{slice.mean_return}</Status></td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -46,19 +83,18 @@ export function BacktestPage() {
           <ul className="rule-list">
             <li><span className="mono subtle">proto</span><span>优秀突破后轻仓探测，验证是否提高早期参与收益。</span></li>
             <li><span className="mono subtle">confirmed</span><span>等待回踩确认，验证是否降低失败率和回撤。</span></li>
-            <li><span className="mono subtle">delta</span><span>报告必须量化等待确认的收益、回撤、胜率和样本损失。</span></li>
+            <li><span className="mono subtle">delta</span><span>{Object.entries(best?.by_signal_state ?? {}).map(([state, item]) => `${state}: ${item.mean_return}`).join(" / ")}</span></li>
           </ul>
         </Panel>
 
         <Panel action={<Status>slices</Status>} title="稳健性切片">
           <div className="decision-chain robustness-chain">
-            <div className="chain-step"><strong>年份</strong><span>避免总样本掩盖失效阶段</span></div>
-            <div className="chain-step"><strong>市场状态</strong><span>risk_on / neutral / risk_off</span></div>
-            <div className="chain-step"><strong>主题贡献</strong><span>避免单一热点主导结论</span></div>
+            <div className="chain-step"><strong>参数</strong><span>{summary.results.map((item) => `${item.name}:${item.parameters.max_holding_bars}`).join(" / ")}</span></div>
+            <div className="chain-step"><strong>集中度</strong><span>{Object.entries(best?.symbol_concentration ?? {}).map(([symbol, value]) => `${symbol} ${value}`).join(" / ")}</span></div>
+            <div className="chain-step"><strong>可靠性</strong><span>{summary.reliability_note}</span></div>
           </div>
         </Panel>
       </section>
     </AppShell>
   );
 }
-
