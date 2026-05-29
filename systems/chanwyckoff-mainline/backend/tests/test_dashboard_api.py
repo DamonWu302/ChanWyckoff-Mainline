@@ -6,7 +6,7 @@ from app.main import create_app
 def test_dashboard_endpoint_returns_operations_snapshot() -> None:
     client = TestClient(create_app())
 
-    response = client.get("/api/dashboard")
+    response = client.get("/api/dashboard?trade_date=2026-05-26")
 
     assert response.status_code == 200
     body = response.json()

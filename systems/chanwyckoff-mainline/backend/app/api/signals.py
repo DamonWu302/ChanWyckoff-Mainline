@@ -1,3 +1,5 @@
+from datetime import date
+
 from fastapi import APIRouter, HTTPException
 
 from app.signals.detail import SignalDetailService, detail_to_dict
@@ -7,10 +9,10 @@ router = APIRouter(prefix="/signals", tags=["signals"])
 
 
 @router.get("")
-def list_signals() -> list[dict[str, object]]:
+def list_signals(trade_date: date | None = None) -> list[dict[str, object]]:
     from app.dashboard.snapshot import build_operations_snapshot
 
-    snapshot = build_operations_snapshot()
+    snapshot = build_operations_snapshot(trade_date=trade_date)
     return snapshot["signals"]
 
 

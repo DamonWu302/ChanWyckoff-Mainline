@@ -6,9 +6,9 @@ from app.main import create_app
 def test_operations_split_endpoints_return_market_theme_core_and_signal_lists() -> None:
     client = TestClient(create_app())
 
-    market_response = client.get("/api/market-regime")
-    themes_response = client.get("/api/themes/mainlines")
-    signals_response = client.get("/api/signals")
+    market_response = client.get("/api/market-regime?trade_date=2026-05-26")
+    themes_response = client.get("/api/themes/mainlines?trade_date=2026-05-26")
+    signals_response = client.get("/api/signals?trade_date=2026-05-26")
 
     assert market_response.status_code == 200
     assert themes_response.status_code == 200

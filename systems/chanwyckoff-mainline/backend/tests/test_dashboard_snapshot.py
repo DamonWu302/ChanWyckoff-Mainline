@@ -12,6 +12,14 @@ from app.selection.theme_strength import (
 )
 
 
+def test_build_operations_snapshot_uses_requested_trade_date() -> None:
+    from app.dashboard.snapshot import build_operations_snapshot
+
+    snapshot = build_operations_snapshot(trade_date=date(2026, 5, 29))
+
+    assert snapshot["trade_date"] == "2026-05-29"
+
+
 def test_dashboard_builder_aggregates_regime_mainlines_core_stocks_and_signals() -> None:
     trade_date = date(2026, 5, 26)
     regime = MarketRegimeResult(

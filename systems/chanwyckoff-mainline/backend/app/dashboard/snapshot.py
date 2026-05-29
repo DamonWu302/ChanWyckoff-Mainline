@@ -102,8 +102,8 @@ class OperationsDashboardBuilder:
         return 45
 
 
-def build_operations_snapshot() -> dict[str, object]:
-    trade_date = date(2026, 5, 26)
+def build_operations_snapshot(trade_date: date | None = None) -> dict[str, object]:
+    trade_date = trade_date or date.today()
     return OperationsDashboardBuilder().build(
         market_regime=_sample_market_regime(trade_date),
         theme_strength=ThemeStrengthResult(trade_date=trade_date, themes=_sample_themes()),
