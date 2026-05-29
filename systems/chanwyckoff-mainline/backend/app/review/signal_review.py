@@ -38,6 +38,17 @@ class LlmReviewPayload:
 
 
 @dataclass(frozen=True, slots=True)
+class RuleSignalContext:
+    signal_uid: str
+    ts_code: str
+    signal_time: datetime
+    rule_state: str
+    suggested_action: str
+    manual_status: str
+    failure_reason: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class FailureDistribution:
     manual_failure_reasons: dict[str, int]
     llm_failure_types: dict[str, int]
@@ -100,6 +111,20 @@ class SignalReviewService:
         self.session.commit()
         self.session.refresh(review)
         return review
+
+    def context_for_llm(self, signal_uid: str) -> RuleSignalContext:
+        record = self.get_record(signal_uid)
+        if record is None:
+            raise ValueError(f"Signal review record does not exist: {signal_uid}")
+        return RuleSignalContext(
+            signal_uid=record.signal_uid,
+            ts_code=record.ts_code,
+            signal_time=record.signal_time,
+            rule_state=record.rule_state,
+            suggested_action=record.suggested_action,
+            manual_status=record.manual_status,
+            failure_reason=record.failure_reason,
+        )
 
     def get_record(self, signal_uid: str) -> SignalReviewRecord | None:
         return self.session.scalar(

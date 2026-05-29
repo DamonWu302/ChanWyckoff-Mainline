@@ -10,8 +10,10 @@ from app.db.base import Base
 from app.review.signal_review import (
     LlmReviewPayload,
     ManualReviewPayload,
+    RuleSignalContext,
     SignalReviewService,
 )
+from app.review.llm_explainer import LlmExplanationDraft, LlmSignalExplainer
 
 
 @pytest.fixture()
@@ -156,3 +158,50 @@ def test_failure_distribution_counts_manual_and_llm_failure_types(db_session: Se
         "heavy_volume_close_back_inside": 1,
     }
     assert distribution.total_failed_records == 3
+
+
+@pytest.mark.asyncio()
+async def test_async_llm_explainer_attaches_summary_without_changing_rule_result(
+    db_session: Session,
+) -> None:
+    class FakeProvider:
+        provider = "fake"
+        model = "unit-test"
+
+        async def explain(self, context: RuleSignalContext) -> LlmExplanationDraft:
+            assert context.rule_state == "confirmed_3buy"
+            return LlmExplanationDraft(
+                background_summary="主线强度仍在，市场环境中性。",
+                feature_summary="突破放量且回踩缩量。",
+                forecast_summary="继续观察承接，跌回结构则失效。",
+                failure_type=None,
+                attempted_rule_state="failed_3buy",
+                attempted_action="filter",
+            )
+
+    signal_uid = "600001.SH-20260526T103000-confirmed"
+    service = SignalReviewService(db_session)
+    service.record_manual_review(
+        ManualReviewPayload(
+            signal_uid=signal_uid,
+            ts_code="600001.SH",
+            signal_time=datetime(2026, 5, 26, 10, 30, tzinfo=timezone.utc),
+            rule_state="confirmed_3buy",
+            suggested_action="upgrade_position",
+            manual_status="prepared",
+            note="等待计划价。",
+            failure_reason=None,
+            return_pct=None,
+            max_drawdown_pct=None,
+            holding_bars=None,
+        )
+    )
+
+    review = await LlmSignalExplainer(service, FakeProvider()).generate_for_record(signal_uid)
+    fetched = service.get_record(signal_uid)
+
+    assert fetched is not None
+    assert fetched.rule_state == "confirmed_3buy"
+    assert fetched.suggested_action == "upgrade_position"
+    assert review.background_summary == "主线强度仍在，市场环境中性。"
+    assert review.attempted_rule_state == "failed_3buy"
