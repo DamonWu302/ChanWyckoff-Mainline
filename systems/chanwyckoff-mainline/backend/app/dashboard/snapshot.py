@@ -45,7 +45,7 @@ class OperationsDashboardBuilder:
                 "evidence": [str(value) for value in market_regime.evidence.values()],
             },
             "mainlines": [self._theme_to_dict(theme) for theme in themes],
-            "signals": [self._signal_to_dict(signal) for signal in signals],
+            "signals": [self._signal_to_dict(signal, market_regime) for signal in signals],
             "filters": {
                 "themes": sorted({signal.theme for signal in signals}),
                 "states": ["proto_3buy", "confirmed_3buy", "failed_3buy"],
@@ -70,14 +70,18 @@ class OperationsDashboardBuilder:
             ],
         }
 
-    def _signal_to_dict(self, signal: DashboardSignalInput) -> dict[str, object]:
+    def _signal_to_dict(
+        self,
+        signal: DashboardSignalInput,
+        market_regime: MarketRegimeResult,
+    ) -> dict[str, object]:
         return {
             "ts_code": signal.ts_code,
             "name": signal.name,
             "theme": signal.theme,
             "state": signal.state,
             "score": signal.score,
-            "suggested_action": signal.suggested_action,
+            "suggested_action": self._signal_action(signal, market_regime),
             "amount": int(signal.amount),
             "signal_time": signal.signal_time.isoformat(),
             "evidence": {
@@ -86,6 +90,15 @@ class OperationsDashboardBuilder:
                 "wyckoff_forecast": signal.wyckoff_forecast,
             },
         }
+
+    def _signal_action(
+        self,
+        signal: DashboardSignalInput,
+        market_regime: MarketRegimeResult,
+    ) -> str:
+        if market_regime.suppress_new_signals and signal.suggested_action != "filter":
+            return "observe"
+        return signal.suggested_action
 
     def _top_themes(self, themes: list[RankedTheme]) -> list[RankedTheme]:
         return [

@@ -78,6 +78,19 @@ def test_dashboard_builder_aggregates_regime_mainlines_core_stocks_and_signals()
             structure_evidence="30m_platform_upper_breakout",
             volume_price_evidence="breakout_expansion_pullback_shrinking",
             wyckoff_forecast="continuation_expected",
+        ),
+        DashboardSignalInput(
+            ts_code="600002.SH",
+            name="机器人核心 Beta",
+            theme="机器人",
+            state="failed_3buy",
+            score=62,
+            suggested_action="filter",
+            amount=Decimal("180000000"),
+            signal_time=datetime(2026, 5, 26, 14, 30, tzinfo=timezone.utc),
+            structure_evidence="30m_platform_failed",
+            volume_price_evidence="breakout_failed",
+            wyckoff_forecast="supply_returned",
         )
     ]
 
@@ -95,4 +108,6 @@ def test_dashboard_builder_aggregates_regime_mainlines_core_stocks_and_signals()
     assert snapshot["mainlines"][0]["theme"] == "机器人"
     assert snapshot["mainlines"][0]["core_stocks"][0]["ts_code"] == "600001.SH"
     assert snapshot["signals"][0]["signal_time"] == "2026-05-26T14:00:00+00:00"
+    assert snapshot["signals"][0]["suggested_action"] == "observe"
+    assert snapshot["signals"][1]["suggested_action"] == "filter"
     assert snapshot["filters"]["themes"] == ["机器人"]
