@@ -1,13 +1,15 @@
-from datetime import date
+from datetime import date, datetime, time
 from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.dashboard.snapshot import DashboardSignalInput, OperationsDashboardBuilder
-from app.models.market_data import DailyBar, IndexBar, Instrument, Theme, ThemeConstituent, ThemeSnapshot
+from app.models.market_data import DailyBar, IndexBar, Instrument, IntradayBar, Theme, ThemeConstituent, ThemeSnapshot
 from app.selection.market_regime import MarketBreadthEvidence, MarketIndexEvidence, MarketRegimeService
-from app.selection.theme_strength import CoreStockEvidence, ThemeStrengthEvidence, ThemeStrengthService
+from app.selection.theme_strength import CoreStockEvidence, ThemeStrengthEvidence, ThemeStrengthResult, ThemeStrengthService
+from app.signals.third_buy import BreakoutBar, ThirdBuySignalService, ThirdBuyStructure
+from app.structure.recognition import Bar30m, RecognizedStructure, StructureRecognitionService
 
 
 class DbOperationsSnapshotSource:
@@ -38,7 +40,7 @@ class DbOperationsSnapshotSource:
         return OperationsDashboardBuilder().build(
             market_regime=market_regime,
             theme_strength=theme_strength,
-            signals=self._signal_inputs(trade_date),
+            signals=self._signal_inputs(trade_date, theme_strength),
         )
 
     def _index_evidence(self, index_code: str, trade_date: date) -> MarketIndexEvidence | None:
@@ -169,8 +171,113 @@ class DbOperationsSnapshotSource:
             strong_theme_count=theme_strength_count,
         )
 
-    def _signal_inputs(self, _: date) -> list[DashboardSignalInput]:
-        return []
+    def _signal_inputs(self, trade_date: date, theme_strength: ThemeStrengthResult) -> list[DashboardSignalInput]:
+        signals: list[DashboardSignalInput] = []
+        for theme in getattr(theme_strength, "themes", []):
+            for stock in theme.core_stocks[:5]:
+                signal = self._signal_for_stock(
+                    trade_date=trade_date,
+                    ts_code=stock.ts_code,
+                    name=stock.name,
+                    theme_name=theme.theme_name,
+                    amount=stock.evidence.market_cap,
+                )
+                if signal is not None:
+                    signals.append(signal)
+        signals.sort(key=lambda item: (item.score, item.amount, item.signal_time), reverse=True)
+        return signals
+
+    def _signal_for_stock(
+        self,
+        trade_date: date,
+        ts_code: str,
+        name: str,
+        theme_name: str,
+        amount: Decimal,
+    ) -> DashboardSignalInput | None:
+        bars = self._intraday_bars(ts_code, trade_date)
+        if len(bars) < 11:
+            return None
+        structure_bars = bars[:-1]
+        breakout_bar = bars[-1]
+        structure_result = StructureRecognitionService().analyze(
+            [self._bar30m_from_intraday(bar) for bar in structure_bars]
+        )
+        if not structure_result.structures:
+            return None
+        structure = structure_result.structures[0]
+        avg_volume = int(sum(bar.volume for bar in structure_bars[-structure.duration_bars :]) / structure.duration_bars)
+        signal = ThirdBuySignalService().evaluate_breakout(
+            ThirdBuyStructure(
+                ts_code=ts_code,
+                upper=structure.upper,
+                lower=structure.lower,
+                mid=structure.mid,
+                quality_score=structure.quality_score,
+                platform_avg_volume=avg_volume,
+            ),
+            BreakoutBar(
+                bar_time=breakout_bar.bar_time,
+                open=breakout_bar.open,
+                high=breakout_bar.high,
+                low=breakout_bar.low,
+                close=breakout_bar.close,
+                volume=breakout_bar.volume,
+                amount=breakout_bar.amount,
+            ),
+        )
+        if signal is None:
+            return None
+        return DashboardSignalInput(
+            ts_code=ts_code,
+            name=name,
+            theme=theme_name,
+            state=signal.state,
+            score=signal.wyckoff.score,
+            suggested_action=signal.action,
+            amount=amount,
+            signal_time=signal.signal_time,
+            structure_evidence=self._structure_evidence(structure),
+            volume_price_evidence=self._volume_price_evidence(signal.volume_ratio),
+            wyckoff_forecast=signal.wyckoff.forecast,
+        )
+
+    def _intraday_bars(self, ts_code: str, trade_date: date) -> list[IntradayBar]:
+        start_at = datetime.combine(trade_date, time.min)
+        end_at = datetime.combine(trade_date, time.max)
+        return list(
+            self.session.scalars(
+                select(IntradayBar)
+                .join(Instrument)
+                .where(
+                    Instrument.ts_code == ts_code,
+                    IntradayBar.frequency == "30m",
+                    IntradayBar.adjustment == "qfq",
+                    IntradayBar.bar_time >= start_at,
+                    IntradayBar.bar_time <= end_at,
+                )
+                .order_by(IntradayBar.bar_time)
+            )
+        )
+
+    def _bar30m_from_intraday(self, bar: IntradayBar) -> Bar30m:
+        return Bar30m(
+            bar_time=bar.bar_time,
+            open=bar.open,
+            high=bar.high,
+            low=bar.low,
+            close=bar.close,
+            volume=bar.volume,
+            amount=bar.amount,
+        )
+
+    def _structure_evidence(self, structure: RecognizedStructure) -> str:
+        return f"{structure.label}_upper_breakout"
+
+    def _volume_price_evidence(self, volume_ratio: Decimal) -> str:
+        if volume_ratio >= Decimal("1.80"):
+            return "breakout_volume_confirmed"
+        return "breakout_volume_adequate"
 
     def _relative_strength(self, history: list[ThemeSnapshot], lookback: int) -> Decimal:
         if not history:
